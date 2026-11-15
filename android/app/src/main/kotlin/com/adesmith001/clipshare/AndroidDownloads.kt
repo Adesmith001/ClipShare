@@ -46,7 +46,12 @@ internal class AndroidDownloads(private val context: Context) {
         }
 
     private fun queue(url: Uri, replacing: Long? = null, original: Uri = url): Boolean {
-        require(directVideo(url))
+        require(
+            directVideo(url) ||
+                (original != url && url.scheme == "https" && url.userInfo == null &&
+                    url.host?.endsWith(".googlevideo.com") == true && url.path == "/videoplayback" &&
+                    url.getQueryParameter("mime") == "video/mp4")
+        )
         val source = original.toString()
         val key = downloadKey(original)
         val matching = history.all.mapNotNull { (id, value) ->

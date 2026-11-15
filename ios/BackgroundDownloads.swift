@@ -30,7 +30,8 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
   static func start(
     _ url: URL, inApp: Bool = false, source: URL? = nil, replacingID: String? = nil
   ) throws -> Bool {
-    guard SharedLinks.isDirectVideo(url) else { throw URLError(.unsupportedURL) }
+    let isVideo = source == nil ? SharedLinks.isDirectVideo(url) : SharedLinks.isResolvedVideo(url)
+    guard isVideo else { throw URLError(.unsupportedURL) }
     return try SharedLinks.withQueueLock {
       let original = source ?? url
       let key = SharedLinks.downloadKey(original)

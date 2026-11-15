@@ -2,6 +2,20 @@ import 'package:clipshare/social_video.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('recognizes YouTube video links without accepting playlists', () {
+    for (final url in [
+      'https://www.youtube.com/watch?v=Dpp1sIL1m5Q',
+      'https://www.youtube.com/shorts/Dpp1sIL1m5Q',
+      'https://youtu.be/Dpp1sIL1m5Q',
+    ]) {
+      expect(isSocialVideo(Uri.parse(url)), isTrue);
+    }
+    expect(
+      isSocialVideo(Uri.parse('https://www.youtube.com/playlist?list=example')),
+      isFalse,
+    );
+  });
+
   test('recognizes public Pin URLs and exact short-link hosts', () {
     expect(
       isSocialVideo(Uri.parse('https://www.pinterest.com/pin/video--123/')),

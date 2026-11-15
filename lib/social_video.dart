@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+
 bool isHttpsLink(Uri? url) =>
     url != null &&
     url.scheme == 'https' &&
@@ -12,6 +14,21 @@ bool isDirectVideo(Uri? url) =>
 
 final _pinPath = RegExp(r'^/pin/(?:[\w-]+--)?([0-9]+)/?$');
 final _postPath = RegExp(r'^/(?:i/web|[^/]+)/status/([0-9]+)(?:/|$)');
+final _videoId = RegExp(r'^[A-Za-z0-9_-]{11}$');
+
+String? _youtubeId(Uri url) {
+  final parts = url.pathSegments;
+  final id = switch (url.host) {
+    'youtu.be' when parts.length == 1 => parts.first,
+    'youtube.com' || 'www.youtube.com' || 'm.youtube.com' => switch (parts) {
+      ['watch'] => url.queryParameters['v'],
+      ['shorts' || 'live', final String id] => id,
+      _ => null,
+    },
+    _ => null,
+  };
+  return id != null && _videoId.hasMatch(id) ? id : null;
+}
 
 String? _xPostId(Uri url) {
   const hosts = {
@@ -37,12 +54,15 @@ bool isSocialVideo(Uri? url) =>
     isHttpsLink(url) &&
     (_pinId(url!) != null ||
         (url.host == 'pin.it' && url.pathSegments.length == 1) ||
-        _xPostId(url) != null);
+        _xPostId(url) != null ||
+        _youtubeId(url) != null);
 
 const _timeout = Duration(seconds: 12);
 
 Future<({Uri source, Uri media})> resolveSocialVideo(Uri url) async {
   if (!isSocialVideo(url)) throw const FormatException('Unsupported post.');
+  final youtubeId = _youtubeId(url);
+  if (youtubeId != null) return _resolveYouTube(youtubeId);
   final client = HttpClient()..connectionTimeout = _timeout;
   try {
     final postId = _xPostId(url);
@@ -97,6 +117,37 @@ Future<({Uri source, Uri media})> resolveSocialVideo(Uri url) async {
     return (source: Uri.https('www.pinterest.com', '/pin/$id/'), media: media);
   } finally {
     client.close(force: true);
+  }
+}
+
+Future<({Uri source, Uri media})> _resolveYouTube(String id) async {
+  final youtube = YoutubeExplode();
+  try {
+    final manifest = await youtube.videos.streams
+        .getManifest(id)
+        .timeout(const Duration(seconds: 25));
+    final muxed = manifest.muxed.where((stream) {
+      final url = stream.url;
+      return stream.container.name == 'mp4' &&
+          isHttpsLink(url) &&
+          url.host.endsWith('.googlevideo.com') &&
+          url.path == '/videoplayback' &&
+          url.queryParameters['mime'] == 'video/mp4';
+    });
+    if (muxed.isEmpty) {
+      throw const FormatException('No combined YouTube MP4 available.');
+    }
+    final best = muxed.reduce(
+      (a, b) => a.bitrate.bitsPerSecond >= b.bitrate.bitsPerSecond ? a : b,
+    );
+    return (
+      source: Uri.https('www.youtube.com', '/watch', {'v': id}),
+      media: best.url,
+    );
+  } on VideoUnavailableException {
+    throw const FormatException('YouTube video unavailable.');
+  } finally {
+    youtube.close();
   }
 }
 

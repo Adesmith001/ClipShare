@@ -11,7 +11,7 @@ flutter pub get
 flutter run
 ```
 
-The app opens to Downloads. Paste a public Pinterest video Pin, a `pin.it` share link, an X video post, or a direct HTTPS MP4 to start a download. ClipShare resolves public posts on-device and selects the highest-resolution Pinterest MP4 or the highest-bitrate MP4 for the first video in an X post. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
+The app opens to Downloads. Paste a public Pinterest video Pin, a `pin.it` share link, an X video post, a YouTube video or Short, or a direct HTTPS MP4. ClipShare resolves public posts on-device. It selects the highest-resolution Pinterest MP4, the highest-bitrate MP4 for the first video in an X post, or the highest-bitrate YouTube MP4 with video and audio in one stream. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
 
 ## Try Android sharing
 
@@ -37,7 +37,7 @@ The **iOS build** workflow compiles Runner and checks that the Share Extension i
 
 To verify the handoff, open a page in Safari, share it to ClipShare, and tap **Add to ClipShare**. Safari should stay foregrounded. Open ClipShare and check that the link appears once as **Pending download**, then close and reopen the app to check that the entry persists.
 
-For a Pinterest video Pin or an X video post, share it to ClipShare the same way, then tap **Download video** on its pending entry in ClipShare. Instagram, TikTok, and YouTube post links still need provider support.
+For a Pinterest video Pin, an X video post, or a YouTube video, share it to ClipShare the same way, then tap **Download video** on its pending entry in ClipShare. Instagram and TikTok post links still need provider support.
 
 To verify a download, open and share a direct HTTPS URL whose path ends in `.mp4`. Use a video you have permission to download and that has audio. Tap **Download** and stay in Safari until the transfer has had time to finish. Open ClipShare, check that the entry says **Saved**, and tap **Play video**. Verify that the video plays with audio and remains available after relaunch. An MP4 URL returning an error page should instead show **Download failed**.
 

@@ -40,6 +40,16 @@ enum SharedLinks {
       url.pathExtension.lowercased() == "mp4"
   }
 
+  static func isResolvedVideo(_ url: URL) -> Bool {
+    if isDirectVideo(url) { return true }
+    guard webURL(url) != nil, url.scheme == "https",
+          url.host?.hasSuffix(".googlevideo.com") == true,
+          url.path == "/videoplayback"
+    else { return false }
+    return URLComponents(url: url, resolvingAgainstBaseURL: false)?
+      .queryItems?.contains { $0.name == "mime" && $0.value == "video/mp4" } == true
+  }
+
   static func downloadKey(_ url: URL) -> String {
     guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
     else { return url.absoluteString }

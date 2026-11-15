@@ -118,9 +118,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       return;
     }
     if (!isDirectVideo(url)) {
-      _showMessage(
-        'Use a Pinterest Pin, an X post, or a direct HTTPS MP4 link.',
-      );
+      _showMessage('Use a Pinterest, X, YouTube, or direct HTTPS MP4 link.');
       return;
     }
     setState(() => _adding = true);
@@ -254,7 +252,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                   controller: _link,
                                   decoration: const InputDecoration(
                                     labelText: 'Video link',
-                                    hintText: 'Pinterest, X, or MP4 link',
+                                    hintText: 'Paste a video link',
                                     border: OutlineInputBorder(),
                                   ),
                                   keyboardType: TextInputType.url,
