@@ -36,6 +36,7 @@ jobs:
           flutter build ios --release --no-codesign --no-pub
           extension=build/ios/iphoneos/Runner.app/PlugIns/ShareExtension.appex
           test -x "$extension/ShareExtension"
+          test -n "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$extension/Info.plist")"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$extension/Info.plist")" = com.apple.share-services
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension/Info.plist")" = com.adesmith001.clipshare.ShareExtension
 
