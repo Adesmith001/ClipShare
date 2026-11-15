@@ -41,11 +41,14 @@ enum SharedLinks {
   }
 
   static func downloadKey(_ url: URL) -> String {
-    var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
-    parts?.scheme = parts?.scheme?.lowercased()
-    parts?.host = parts?.host?.lowercased()
-    parts?.fragment = nil
-    return parts?.string ?? url.absoluteString
+    guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    else { return url.absoluteString }
+    let scheme = parts.scheme?.lowercased()
+    let host = parts.host?.lowercased()
+    parts.scheme = scheme
+    parts.host = host
+    parts.fragment = nil
+    return parts.string ?? url.absoluteString
   }
 
   static func withQueueLock<T>(_ work: () throws -> T) throws -> T {

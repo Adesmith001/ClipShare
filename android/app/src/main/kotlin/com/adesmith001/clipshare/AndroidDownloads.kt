@@ -46,7 +46,7 @@ internal class AndroidDownloads(private val context: Context) {
             return false
         }
 
-        val request = DownloadManager.Request(url)
+        val request = DownloadManager.Request(url.normalizeScheme())
             .setTitle("ClipShare video")
             .setDestinationInExternalFilesDir(
                 context, Environment.DIRECTORY_MOVIES, "${UUID.randomUUID()}.mp4"
