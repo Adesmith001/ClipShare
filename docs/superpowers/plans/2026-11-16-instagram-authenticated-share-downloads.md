@@ -33,13 +33,13 @@
 - `WKWebView` uses `WKWebsiteDataStore.default()` and is retained by the Share Extension view controller for the whole share-sheet session.
 - After a sign-in navigation completes, the extension reloads the retained shared URL. This task only proves login and session reuse; social media resolution remains for Task 2.
 
-- [ ] Create a `WKWebView` with the default persistent website data store and add it to the extension view with Auto Layout.
-- [ ] Add a controller state for `loadingLink`, `signingIn`, `connected`, and `failed`; keep Cancel and the shared URL visible in appropriate states.
-- [ ] Load the shared Instagram URL first. If WebKit navigates to an Instagram `/accounts/login` route, keep the current web view visible for the user to sign in on Instagram.
-- [ ] When the user finishes Instagram sign-in and leaves the login route, reload the retained shared URL in the same web view and display a connected/ready state.
-- [ ] Add a **Disconnect Instagram** action that deletes Instagram cookies and website data from the extension's default `WKWebsiteDataStore`.
-- [ ] Keep direct HTTPS media behavior unchanged and keep non-Instagram social links in the existing pending-link flow.
-- [ ] Update the iOS sharing instructions in `README.md` to describe first-time sign-in inside the share sheet.
+- [x] Create a `WKWebView` with the default persistent website data store and add it to the extension view with Auto Layout.
+- [x] Add a controller state for link checking, sign-in, retry, connected, and idle; keep Cancel and the shared URL visible in appropriate states.
+- [x] Load the shared Instagram URL first. If WebKit navigates to an Instagram `/accounts/login` route, keep the current web view visible for the user to sign in on Instagram.
+- [x] When the user finishes Instagram sign-in and leaves the login route, reload the retained shared URL in the same web view and display a connected/ready state.
+- [x] Add a **Disconnect Instagram** action that deletes Instagram cookies and website data from the extension's default `WKWebsiteDataStore`.
+- [x] Keep direct HTTPS media behavior unchanged and keep non-Instagram social links in the existing pending-link flow.
+- [x] Update the iOS sharing instructions in `README.md` to describe first-time sign-in inside the share sheet.
 - [ ] Commit and push this feasibility milestone, dispatch the signed iOS build, install it when the iPhone is available, and ask the user to sign in and share the same Instagram post again to verify the WebKit session persisted.
 
 ### Task 2: Resolve and queue Instagram media in the extension

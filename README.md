@@ -37,7 +37,9 @@ The **iOS build** workflow compiles Runner and checks that the Share Extension i
 
 To verify the handoff, open a page in Safari, share it to ClipShare, and tap **Add to ClipShare**. Safari should stay foregrounded. Open ClipShare and check that the link appears once as **Pending download**, then close and reopen the app to check that the entry persists.
 
-For a supported social video, share it to ClipShare the same way, then tap **Download video** on its pending entry in ClipShare. TikTok links still need provider support.
+For Instagram on iPhone, choose **ClipShare** from Instagram's share sheet. On the first use, sign in on Instagram's page shown inside the share sheet; ClipShare keeps the session in the extension's on-device WebKit store and does not collect your password. After that, sharing an Instagram Reel, photo, or carousel to ClipShare resolves and queues its supported media without opening the main app. If Instagram expires or challenges the session, sign in again in the share sheet. Use **Disconnect Instagram** there to clear the saved website session.
+
+Other supported social posts shared to ClipShare appear as pending entries. Open ClipShare and tap **Download video** on a pending social video. TikTok links still need provider support. Pasting an Instagram link into the main app does not use the Share Extension's Instagram session.
 
 To verify a download, open and share a direct HTTPS URL whose path ends in `.mp4`. Use a video you have permission to download and that has audio. Tap **Download** and stay in Safari until the transfer has had time to finish. Open ClipShare, check that the entry says **Saved**, and tap **Play video**. Verify that the video plays with audio and remains available after relaunch. An MP4 URL returning an error page should instead show **Download failed**.
 
