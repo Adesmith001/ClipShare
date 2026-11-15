@@ -56,6 +56,7 @@ final class ShareViewController: UIViewController {
           message.text = url.absoluteString
           message.lineBreakMode = .byTruncatingMiddle
           message.numberOfLines = 3
+          saveButton.setTitle(SharedLinks.isDirectVideo(url) ? "Download" : "Add to ClipShare", for: .normal)
           saveButton.isEnabled = true
           return
         }
@@ -77,7 +78,11 @@ final class ShareViewController: UIViewController {
   @objc private func save() {
     guard let sharedURL else { return }
     do {
-      try SharedLinks.enqueue(sharedURL)
+      if SharedLinks.isDirectVideo(sharedURL) {
+        try BackgroundDownloads.start(sharedURL)
+      } else {
+        _ = try SharedLinks.enqueue(sharedURL)
+      }
       close()
     } catch {
       message.text = "Couldn’t add the link. Try again."

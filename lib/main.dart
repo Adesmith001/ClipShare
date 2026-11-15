@@ -42,34 +42,56 @@ class DownloadsScreen extends StatefulWidget {
 class _DownloadsScreenState extends State<DownloadsScreen> {
   static const _channel = MethodChannel('clipshare/shared_links');
   late final AppLifecycleListener _lifecycle;
-  List<String> _sharedLinks = const [];
+  List<Map<Object?, Object?>> _sharedLinks = const [];
   bool _inboxUnavailable = false;
+
+  bool get _hasShareExtension =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   @override
   void initState() {
     super.initState();
     _lifecycle = AppLifecycleListener(onResume: _refreshSharedLinks);
-    _refreshSharedLinks();
+    if (_hasShareExtension) {
+      _channel.setMethodCallHandler((call) async {
+        if (call.method == 'changed') await _refreshSharedLinks();
+      });
+      _refreshSharedLinks();
+    }
   }
 
   @override
   void dispose() {
     _lifecycle.dispose();
+    if (_hasShareExtension) _channel.setMethodCallHandler(null);
     super.dispose();
   }
 
   Future<void> _refreshSharedLinks() async {
-    if (defaultTargetPlatform != TargetPlatform.iOS || kIsWeb) return;
+    if (!_hasShareExtension) return;
     try {
-      final links = await _channel.invokeListMethod<String>('list') ?? [];
+      final links = await _channel.invokeListMethod<Map<Object?, Object?>>(
+        'list',
+      );
       if (!mounted) return;
       setState(() {
-        _sharedLinks = links;
+        _sharedLinks = links ?? [];
         _inboxUnavailable = false;
       });
     } on PlatformException {
       if (!mounted) return;
       setState(() => _inboxUnavailable = true);
+    }
+  }
+
+  Future<void> _playVideo(String id) async {
+    try {
+      await _channel.invokeMethod<void>('play', id);
+    } on PlatformException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This video is unavailable.')),
+      );
     }
   }
 
@@ -129,17 +151,35 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 else if (_sharedLinks.isNotEmpty)
                   SliverList.builder(
                     itemCount: _sharedLinks.length,
-                    itemBuilder: (context, index) => ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                      ),
-                      title: Text(
-                        _sharedLinks[index],
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: const Text('Pending download'),
-                    ),
+                    itemBuilder: (context, index) {
+                      final link = _sharedLinks[index];
+                      final state = link['state'];
+                      final status = switch (state) {
+                        'downloading' => 'Downloading',
+                        'saved' => 'Saved',
+                        'failed' => 'Download failed',
+                        _ => 'Pending download',
+                      };
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                        ),
+                        title: Text(
+                          link['url'] as String,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(status),
+                        trailing: state == 'saved'
+                            ? IconButton(
+                                tooltip: 'Play video',
+                                onPressed: () =>
+                                    _playVideo(link['id'] as String),
+                                icon: const Icon(Icons.play_arrow_rounded),
+                              )
+                            : null,
+                      );
+                    },
                   )
                 else
                   SliverFillRemaining(

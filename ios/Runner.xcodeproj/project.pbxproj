@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C115A2E00000000000000020 /* BackgroundDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = C115A2E00000000000000022 /* BackgroundDownloads.swift */; };
+		C115A2E00000000000000021 /* BackgroundDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = C115A2E00000000000000022 /* BackgroundDownloads.swift */; };
 		C115A2E00000000000000001 = {isa = PBXBuildFile; fileRef = C115A2E00000000000000002; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C115A2E00000000000000003 = {isa = PBXBuildFile; fileRef = C115A2E00000000000000004; };
 		C115A2E00000000000000005 = {isa = PBXBuildFile; fileRef = C115A2E00000000000000006; };
@@ -62,6 +64,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C115A2E00000000000000022 /* BackgroundDownloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloads.swift; sourceTree = "<group>"; };
 		C115A2E00000000000000002 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C115A2E00000000000000004 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		C115A2E00000000000000006 /* SharedLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedLinks.swift; sourceTree = "<group>"; };
@@ -133,6 +136,7 @@
 				331C8082294A63A400263BE5 /* RunnerTests */,
 				C115A2E00000000000000013 /* ShareExtension */,
 				C115A2E00000000000000006 /* SharedLinks.swift */,
+				C115A2E00000000000000022 /* BackgroundDownloads.swift */,
 				C115A2E00000000000000012 /* ClipShare.entitlements */,
 			);
 			sourceTree = "<group>";
@@ -321,7 +325,11 @@
 		C115A2E00000000000000015 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (C115A2E00000000000000003 /* ShareViewController.swift in Sources */, C115A2E00000000000000005 /* SharedLinks.swift in Sources */, );
+			files = (
+				C115A2E00000000000000003 /* ShareViewController.swift in Sources */,
+				C115A2E00000000000000005 /* SharedLinks.swift in Sources */,
+				C115A2E00000000000000020 /* BackgroundDownloads.swift in Sources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		331C807D294A63A400263BE5 /* Sources */ = {
@@ -340,6 +348,7 @@
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 				C115A2E00000000000000007 /* SharedLinks.swift in Sources */,
+				C115A2E00000000000000021 /* BackgroundDownloads.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

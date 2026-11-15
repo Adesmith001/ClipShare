@@ -11,7 +11,7 @@ flutter pub get
 flutter run
 ```
 
-The app opens to Downloads. On iOS, links added from the Share Extension appear there as pending. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
+The app opens to Downloads. On iOS, ClipShare can queue a shared web link or start downloading a direct HTTPS MP4 from the Share Extension. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
 
 ## Build and install on iPhone
 
@@ -24,6 +24,8 @@ The **iOS build** workflow compiles Runner and checks that the Share Extension i
 5. Try `xtool install <path-to-ipa>` from WSL with the iPhone paired over USB. If re-signing changes the App Group, use `ideviceinstaller install <path-to-ipa>` to install the CI-signed IPA directly.
 
 To verify the handoff, open a page in Safari, share it to ClipShare, and tap **Add to ClipShare**. Safari should stay foregrounded. Open ClipShare and check that the link appears once as **Pending download**, then close and reopen the app to check that the entry persists.
+
+To verify a download, open and share a direct HTTPS URL whose path ends in `.mp4`. Use a video you have permission to download and that has audio. Tap **Download** and stay in Safari until the transfer has had time to finish. Open ClipShare, check that the entry says **Saved**, and tap **Play video**. Verify that the video plays with audio and remains available after relaunch. An MP4 URL returning an error page should instead show **Download failed**.
 
 ## Milestones
 
