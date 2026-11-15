@@ -26,6 +26,7 @@
 
 **Files:**
 - Modify `ios/ShareExtension/ShareViewController.swift`
+- Modify `pubspec.yaml`
 - Modify `README.md`
 
 **Interfaces:**
@@ -39,6 +40,7 @@
 - [x] When the user finishes Instagram sign-in and leaves the login route, reload the retained shared URL in the same web view and display a connected/ready state.
 - [x] Add a **Disconnect Instagram** action that deletes Instagram cookies and website data from the extension's default `WKWebsiteDataStore`.
 - [x] Keep direct HTTPS media behavior unchanged and keep non-Instagram social links in the existing pending-link flow.
+- [ ] Increment the app version to `0.1.6+7` so the feasibility build installs as an update on the current iPhone build.
 - [x] Update the iOS sharing instructions in `README.md` to describe first-time sign-in inside the share sheet.
 - [ ] Commit and push this feasibility milestone, dispatch the signed iOS build, install it when the iPhone is available, and ask the user to sign in and share the same Instagram post again to verify the WebKit session persisted.
 
