@@ -60,11 +60,16 @@ class MainActivity : FlutterActivity() {
                             result.error("invalid_argument", null, null)
                         } else {
                             try {
-                                result.success(downloads.enqueueResolved(media, source, replacing))
+                                result.success(downloads.enqueueResolved(media, source, replacing, call.argument<String>("title")))
                             } catch (error: Exception) {
                                 result.error("download_action_failed", null, null)
                             }
                         }
+                    }
+                    "thumbnail", "preview" -> {
+                        val id = (call.arguments as? String)?.toLongOrNull()
+                        val size = if (call.method == "preview") 1600 else 400
+                        result.success(id?.let { downloads.thumbnail(it, size) })
                     }
                     "add", "cancel", "retry", "export" -> {
                         val argument = call.arguments as? String

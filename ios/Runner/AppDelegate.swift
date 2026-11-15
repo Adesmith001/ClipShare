@@ -1,5 +1,6 @@
 import AVKit
 import Flutter
+import ImageIO
 import Photos
 import UIKit
 
@@ -35,6 +36,34 @@ import UIKit
           return
         }
         result(nil)
+      case "thumbnail", "preview":
+        guard let id = call.arguments as? String,
+              let file = self?.savedFile(id) else {
+          result(nil)
+          return
+        }
+        if file.pathExtension == "mp4" {
+          let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
+          generator.appliesPreferredTrackTransform = true
+          generator.maximumSize = CGSize(width: 400, height: 400)
+          generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: .zero)]) {
+            [generator] _, image, _, _, _ in
+            _ = generator
+            DispatchQueue.main.async { Self.sendPreview(image, result: result) }
+          }
+        } else {
+          let size = call.method == "preview" ? 1600 : 400
+          DispatchQueue.global(qos: .userInitiated).async {
+            let image = CGImageSourceCreateWithURL(file as CFURL, nil).flatMap {
+              CGImageSourceCreateThumbnailAtIndex($0, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: size,
+              ] as CFDictionary)
+            }
+            DispatchQueue.main.async { Self.sendPreview(image, result: result) }
+          }
+        }
       case "addResolved":
         guard let arguments = call.arguments as? [String: String],
               let source = arguments["source"].flatMap({ URL(string: $0) }),
@@ -46,7 +75,8 @@ import UIKit
         }
         do {
           result(try BackgroundDownloads.start(
-            media, inApp: true, source: source, replacingID: arguments["replacing"]
+            media, inApp: true, source: source, replacingID: arguments["replacing"],
+            title: arguments["title"]
           ))
         } catch {
           result(FlutterError(code: "download_action_failed", message: nil, details: nil))
@@ -72,7 +102,7 @@ import UIKit
           result(FlutterError(code: "download_action_failed", message: nil, details: nil))
         }
       case "saveToPhotos", "exportToFiles":
-        guard let id = call.arguments as? String, let file = self?.savedVideo(id) else {
+        guard let id = call.arguments as? String, let file = self?.savedFile(id) else {
           result(FlutterError(code: "video_unavailable", message: nil, details: nil))
           return
         }
@@ -104,7 +134,8 @@ import UIKit
   }
 
   private func playDownload(_ id: String) -> Bool {
-    guard let file = savedVideo(id), let root = presenter() else { return false }
+    guard let file = savedFile(id), file.pathExtension == "mp4",
+          let root = presenter() else { return false }
 
     let player = AVPlayer(url: file)
     let controller = AVPlayerViewController()
@@ -113,9 +144,14 @@ import UIKit
     return true
   }
 
-  private func savedVideo(_ id: String) -> URL? {
+  private static func sendPreview(_ image: CGImage?, result: FlutterResult) {
+    let data = image.flatMap { UIImage(cgImage: $0).jpegData(compressionQuality: 0.85) }
+    result(data.map { FlutterStandardTypedData(bytes: $0) })
+  }
+
+  private func savedFile(_ id: String) -> URL? {
     guard let entry = try? SharedLinks.entry(id), entry.state == .saved,
-          let file = try? SharedLinks.file(id, suffix: "mp4"),
+          let file = try? SharedLinks.file(id, suffix: entry.imageExtension ?? "mp4"),
           FileManager.default.fileExists(atPath: file.path)
     else { return nil }
     return file
@@ -139,7 +175,8 @@ import UIKit
       }
       PHPhotoLibrary.shared().performChanges {
         let request = PHAssetCreationRequest.forAsset()
-        request.addResource(with: .video, fileURL: file, options: nil)
+        request.addResource(with: file.pathExtension == "mp4" ? .video : .photo,
+                            fileURL: file, options: nil)
       } completionHandler: { saved, _ in
         DispatchQueue.main.async {
           if saved {

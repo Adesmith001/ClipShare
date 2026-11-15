@@ -12,6 +12,12 @@ bool isHttpsLink(Uri? url) =>
 bool isDirectVideo(Uri? url) =>
     isHttpsLink(url) && url!.path.toLowerCase().endsWith('.mp4');
 
+bool isDirectImage(Uri? url) =>
+    isHttpsLink(url) &&
+    RegExp(r'\.(?:jpe?g|png)$').hasMatch(url!.path.toLowerCase());
+
+typedef ResolvedMedia = ({Uri source, Uri media, String? title});
+
 final _pinPath = RegExp(r'^/pin/(?:[\w-]+--)?([0-9]+)/?$');
 final _postPath = RegExp(r'^/(?:i/web|[^/]+)/status/([0-9]+)(?:/|$)');
 final _videoId = RegExp(r'^[A-Za-z0-9_-]{11}$');
@@ -74,7 +80,7 @@ bool isSocialVideo(Uri? url) =>
 
 const _timeout = Duration(seconds: 12);
 
-Future<({Uri source, Uri media})> resolveSocialVideo(Uri url) async {
+Future<ResolvedMedia> resolveSocialVideo(Uri url) async {
   if (!isSocialVideo(url)) throw const FormatException('Unsupported post.');
   final youtubeId = _youtubeId(url);
   if (youtubeId != null) return _resolveYouTube(youtubeId);
@@ -96,11 +102,25 @@ Future<({Uri source, Uri media})> resolveSocialVideo(Uri url) async {
           'Sec-Fetch-Mode': 'navigate',
         },
       );
-      final media = html == null ? null : instagramMp4(html, instagramCode);
+      final post = html == null
+          ? null
+          : _instagramPagePost(html, instagramCode);
+      final media =
+          _instagramVideo(post) ??
+          (_field(post, 'media_type') == 1
+              ? _largestImage(
+                  _field(_field(post, 'image_versions2'), 'candidates'),
+                  _instagramCdn,
+                )
+              : null);
       if (media == null) {
-        throw const FormatException('Instagram video unavailable.');
+        throw const FormatException('Instagram media unavailable.');
       }
-      return (source: source, media: media);
+      return (
+        source: source,
+        media: media,
+        title: _title(_field(_field(post, 'caption'), 'text')),
+      );
     }
     final postId = _xPostId(url);
     if (postId != null) {
@@ -109,11 +129,13 @@ Future<({Uri source, Uri media})> resolveSocialVideo(Uri url) async {
         'lang': 'en',
         'token': '1',
       });
-      final media = xMp4(await _requestJson(client, endpoint));
-      if (media == null) throw const FormatException('No MP4 on this post.');
+      final post = await _requestJson(client, endpoint);
+      final media = xMp4(post) ?? _xPhoto(post);
+      if (media == null) throw const FormatException('No media on this post.');
       return (
         source: Uri.https('x.com', '/i/web/status/$postId'),
         media: media,
+        title: _title(_field(post, 'text')),
       );
     }
     var id = _pinId(url);
@@ -143,21 +165,38 @@ Future<({Uri source, Uri media})> resolveSocialVideo(Uri url) async {
         }),
       },
     );
-    final media = pinterestMp4(
-      await _requestJson(
-        client,
-        endpoint,
-        headers: {'X-Pinterest-PWS-Handler': 'www/[username].js'},
-      ),
+    final post = await _requestJson(
+      client,
+      endpoint,
+      headers: {'X-Pinterest-PWS-Handler': 'www/[username].js'},
     );
-    if (media == null) throw const FormatException('No MP4 on this pin.');
-    return (source: Uri.https('www.pinterest.com', '/pin/$id/'), media: media);
+    final data = _field(_field(post, 'resource_response'), 'data');
+    final images = _field(data, 'images');
+    final media =
+        pinterestMp4(post) ??
+        (_field(data, 'videos') == null &&
+                _field(data, 'story_pin_data') == null &&
+                images is Map
+            ? _largestImage(
+                images.values,
+                (uri) => uri.host.endsWith('.pinimg.com'),
+              )
+            : null);
+    if (media == null) {
+      throw const FormatException('No supported media on this pin.');
+    }
+    return (
+      source: Uri.https('www.pinterest.com', '/pin/$id/'),
+      media: media,
+      title:
+          _title(_field(data, 'title')) ?? _title(_field(data, 'grid_title')),
+    );
   } finally {
     client.close(force: true);
   }
 }
 
-Future<({Uri source, Uri media})> _resolveYouTube(String id) async {
+Future<ResolvedMedia> _resolveYouTube(String id) async {
   final youtube = YoutubeExplode();
   try {
     final manifest = await youtube.videos.streams
@@ -177,9 +216,19 @@ Future<({Uri source, Uri media})> _resolveYouTube(String id) async {
     final best = muxed.reduce(
       (a, b) => a.bitrate.bitsPerSecond >= b.bitrate.bitsPerSecond ? a : b,
     );
+    String? title;
+    try {
+      final video = await youtube.videos
+          .get(id)
+          .timeout(const Duration(seconds: 4));
+      title = _title(video.title);
+    } on Exception {
+      // Media already resolved and can still be downloaded.
+    }
     return (
       source: Uri.https('www.youtube.com', '/watch', {'v': id}),
       media: best.url,
+      title: title,
     );
   } on VideoUnavailableException {
     throw const FormatException('YouTube video unavailable.');
@@ -220,39 +269,88 @@ Future<String?> _requestText(
   return text.toString();
 }
 
-Uri? instagramMp4(String html, String code) {
+Uri? instagramMp4(String html, String code) =>
+    _instagramVideo(_instagramPagePost(html, code));
+
+Object? _instagramPagePost(String html, String code) {
   for (final script in _jsonScript.allMatches(html)) {
     final text = script.group(1)!;
     if (!text.contains('"xig_polaris_media"')) continue;
     try {
       final post = _instagramPost(jsonDecode(text), code, 0);
-      final videos = _field(post, 'video_versions');
-      if (videos is List) {
-        Uri? selected;
-        num bestPixels = -1;
-        for (final video in videos) {
-          final value = _field(video, 'url');
-          final url = value is String ? Uri.tryParse(value) : null;
-          if (!isDirectVideo(url) ||
-              !(url!.host.endsWith('.cdninstagram.com') ||
-                  url.host.endsWith('.fbcdn.net'))) {
-            continue;
-          }
-          final width = _field(video, 'width');
-          final height = _field(video, 'height');
-          final pixels = width is num && height is num ? width * height : 0;
-          if (pixels > bestPixels) {
-            selected = url;
-            bestPixels = pixels;
-          }
-        }
-        if (selected != null) return selected;
-      }
+      if (post != null) return post;
     } on FormatException {
       continue;
     }
   }
   return null;
+}
+
+bool _instagramCdn(Uri uri) =>
+    uri.host.endsWith('.cdninstagram.com') || uri.host.endsWith('.fbcdn.net');
+
+Uri? _instagramVideo(Object? post) {
+  final videos = _field(post, 'video_versions');
+  if (videos is List) {
+    Uri? selected;
+    num bestPixels = -1;
+    for (final video in videos) {
+      final value = _field(video, 'url');
+      final url = value is String ? Uri.tryParse(value) : null;
+      if (!isDirectVideo(url) || !_instagramCdn(url!)) {
+        continue;
+      }
+      final width = _field(video, 'width');
+      final height = _field(video, 'height');
+      final pixels = width is num && height is num ? width * height : 0;
+      if (pixels > bestPixels) {
+        selected = url;
+        bestPixels = pixels;
+      }
+    }
+    return selected;
+  }
+  return null;
+}
+
+Uri? _xPhoto(Object? post) {
+  final details = _field(post, 'mediaDetails');
+  if (details is! List) return null;
+  for (final item in details) {
+    if (_field(item, 'type') != 'photo') continue;
+    final value = _field(item, 'media_url_https');
+    final url = value is String ? Uri.tryParse(value) : null;
+    if (isDirectImage(url) && url!.host == 'pbs.twimg.com') {
+      return url.replace(queryParameters: {'name': 'orig'});
+    }
+  }
+  return null;
+}
+
+Uri? _largestImage(Object? values, bool Function(Uri) isCdn) {
+  if (values is! Iterable) return null;
+  Uri? selected;
+  num bestPixels = -1;
+  for (final item in values) {
+    final value = _field(item, 'url');
+    final url = value is String ? Uri.tryParse(value) : null;
+    if (!isDirectImage(url) || !isCdn(url!)) continue;
+    final width = _field(item, 'width');
+    final height = _field(item, 'height');
+    final pixels = width is num && height is num ? width * height : 0;
+    if (pixels > bestPixels) {
+      bestPixels = pixels;
+      selected = url;
+    }
+  }
+  return selected;
+}
+
+String? _title(Object? value) {
+  if (value is! String) return null;
+  final text = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+  if (text.isEmpty) return null;
+  return String.fromCharCodes(text.runes.take(180));
 }
 
 Object? _instagramPost(Object? value, String code, int depth) {

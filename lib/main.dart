@@ -51,6 +51,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   List<Map<Object?, Object?>> _sharedLinks = const [];
   bool _inboxUnavailable = false;
   bool _adding = false;
+  final _thumbnails = <String, Future<Uint8List?>>{};
 
   bool get _hasNativeDownloads =>
       !kIsWeb &&
@@ -117,9 +118,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       await _downloadPost(url!);
       return;
     }
-    if (!isDirectVideo(url)) {
+    if (!isDirectVideo(url) && !isDirectImage(url)) {
       _showMessage(
-        'Use a Pinterest, X, Instagram, YouTube, or direct HTTPS MP4 link.',
+        'Paste a supported post link or a direct MP4, JPEG, or PNG link.',
       );
       return;
     }
@@ -129,7 +130,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       if (!mounted) return;
       _link.clear();
       FocusScope.of(context).unfocus();
-      if (added == false) _showMessage('This video is already in Downloads.');
+      if (added == false) _showMessage('This item is already in Downloads.');
       await _refreshSharedLinks();
     } on PlatformException {
       if (mounted) _showMessage('Couldn’t start the download.');
@@ -142,27 +143,30 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     if (_adding) return;
     setState(() => _adding = true);
     try {
-      final resolved = await resolveSocialVideo(url);
+      final resolved = isDirectImage(url)
+          ? (source: url, media: url, title: null)
+          : await resolveSocialVideo(url);
       if (!mounted) return;
       final added = await _channel.invokeMethod<bool>('addResolved', {
         'source': resolved.source.toString(),
         'media': resolved.media.toString(),
         'replacing': ?replacing,
+        'title': ?resolved.title,
       });
       if (!mounted) return;
       if (replacing == null) {
         _link.clear();
         FocusScope.of(context).unfocus();
       }
-      if (added == false) _showMessage('This video is already in Downloads.');
+      if (added == false) _showMessage('This item is already in Downloads.');
       await _refreshSharedLinks();
     } on FormatException {
-      if (mounted) _showMessage('This post has no accessible MP4 video.');
+      if (mounted) _showMessage('This post has no supported image or video.');
     } on PlatformException {
       if (mounted) _showMessage('Couldn’t start the download.');
     } on Exception {
       if (mounted) {
-        _showMessage('Couldn’t reach the video provider. Try again.');
+        _showMessage('Couldn’t reach the media provider. Try again.');
       }
     } finally {
       if (mounted) setState(() => _adding = false);
@@ -180,10 +184,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       if (!mounted) return;
       if (completed == false) _showMessage('This download has changed.');
       if (action == 'export' && completed == true) {
-        _showMessage('Video saved to Gallery.');
+        _showMessage('Saved to Gallery.');
       }
       if (action == 'saveToPhotos' && completed == true) {
-        _showMessage('Video saved to Photos.');
+        _showMessage('Saved to Photos.');
       }
       await _refreshSharedLinks();
     } on PlatformException catch (error) {
@@ -208,221 +212,332 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
   }
 
+  Future<Uint8List?> _mediaPreview(String method, String id) async {
+    try {
+      return await _channel.invokeMethod<Uint8List>(method, id);
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<void> _openImage(String id, String title) async {
+    final bytes = await _mediaPreview('preview', id);
+    if (!mounted) return;
+    if (bytes == null) {
+      _showMessage('This image is unavailable.');
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          body: Center(child: InteractiveViewer(child: Image.memory(bytes))),
+        ),
+      ),
+    );
+  }
+
+  Widget _downloadRow(Map<Object?, Object?> entry) {
+    final theme = Theme.of(context);
+    final id = entry['id'] as String;
+    final url = Uri.tryParse(entry['url'] as String);
+    final host = url?.host.replaceFirst(RegExp(r'^(www|m|mobile)\.'), '') ?? '';
+    final source = switch (host) {
+      'youtube.com' || 'youtu.be' => 'YouTube',
+      'pinterest.com' || 'pin.it' => 'Pinterest',
+      'twitter.com' || 'x.com' => 'X',
+      'instagram.com' => 'Instagram',
+      _ => host,
+    };
+    final isImage = entry['isImage'] == true || isDirectImage(url);
+    final isDirect = isDirectVideo(url) || isDirectImage(url);
+    final filename = isDirect && url!.pathSegments.isNotEmpty
+        ? url.pathSegments.last
+              .replaceFirst(RegExp(r'\.[^.]+$'), '')
+              .replaceAll(RegExp(r'[_-]+'), ' ')
+        : null;
+    final title =
+        entry['title'] as String? ??
+        (filename?.isNotEmpty == true
+            ? filename!
+            : (source.isEmpty ? 'Shared link' : '$source post'));
+    final state = entry['state'];
+    final saved = state == 'saved';
+    final progress = entry['progress'] as num?;
+    final status = switch (state) {
+      'downloading' when progress != null =>
+        'Downloading · ${(progress * 100).round()}%',
+      'downloading' => 'Downloading',
+      'saved' => 'Saved',
+      'failed' => 'Download failed',
+      'cancelled' => 'Cancelled',
+      _ => 'Pending download',
+    };
+    final open = saved
+        ? () => isImage ? _openImage(id, title) : _playVideo(id)
+        : null;
+    final placeholder = ColoredBox(
+      color: theme.colorScheme.secondary.withValues(alpha: 0.45),
+      child: Center(
+        child: Icon(isImage ? Icons.image_outlined : Icons.movie_outlined),
+      ),
+    );
+    if (saved && !_thumbnails.containsKey(id)) {
+      if (_thumbnails.length == 64) _thumbnails.remove(_thumbnails.keys.first);
+      _thumbnails[id] = _mediaPreview('thumbnail', id);
+    }
+    final thumbnail = SizedBox(
+      width: 120,
+      height: 72,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (saved)
+              FutureBuilder<Uint8List?>(
+                future: _thumbnails[id],
+                builder: (context, snapshot) => snapshot.data == null
+                    ? placeholder
+                    : Image.memory(
+                        snapshot.data!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => placeholder,
+                      ),
+              )
+            else
+              placeholder,
+            if (saved && !isImage)
+              Align(
+                alignment: Alignment.bottomRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: plum,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow_rounded,
+                      color: ivory,
+                      size: 21,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        if (open == null)
+          thumbnail
+        else
+          Tooltip(
+            message: isImage ? 'View image' : 'Play video',
+            child: InkWell(
+              onTap: open,
+              borderRadius: BorderRadius.circular(10),
+              child: thumbnail,
+            ),
+          ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: InkWell(
+            onTap: open,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                if (source.isNotEmpty)
+                  Text(
+                    source,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (saved && entry['canExport'] == true)
+          PopupMenuButton<String>(
+            tooltip: isImage ? 'Export image' : 'Export video',
+            onSelected: (action) => _queueAction(action, id),
+            itemBuilder: (_) => defaultTargetPlatform == TargetPlatform.iOS
+                ? const [
+                    PopupMenuItem(
+                      value: 'saveToPhotos',
+                      child: Text('Save to Photos'),
+                    ),
+                    PopupMenuItem(
+                      value: 'exportToFiles',
+                      child: Text('Save to Files'),
+                    ),
+                  ]
+                : const [
+                    PopupMenuItem(
+                      value: 'export',
+                      child: Text('Save to Gallery'),
+                    ),
+                  ],
+          )
+        else if (state == 'downloading' && entry['canCancel'] == true)
+          IconButton(
+            tooltip: 'Cancel download',
+            onPressed: () => _queueAction('cancel', id),
+            icon: const Icon(Icons.close_rounded),
+          )
+        else if ((state == 'pending' && isDirectImage(url)) ||
+            ((state == 'pending' || entry['canRetry'] == true) &&
+                isSocialVideo(url)))
+          IconButton(
+            tooltip: state == 'pending' ? 'Download media' : 'Retry download',
+            onPressed: _adding
+                ? null
+                : () => _downloadPost(url!, replacing: id),
+            icon: Icon(
+              state == 'pending'
+                  ? Icons.download_rounded
+                  : Icons.refresh_rounded,
+            ),
+          )
+        else if (entry['canRetry'] == true)
+          IconButton(
+            tooltip: 'Retry download',
+            onPressed: () => _queueAction('retry', id),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: CustomScrollView(
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-                  sliver: SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'ClipShare',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: colors.primary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 32),
-                        Semantics(
-                          header: true,
-                          child: Text(
-                            'Downloads',
-                            style: theme.textTheme.displaySmall?.copyWith(
-                              color: colors.primary,
+            constraints: const BoxConstraints(maxWidth: 1000),
+            child: LayoutBuilder(
+              builder: (context, constraints) => CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+                    sliver: SliverToBoxAdapter(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'ClipShare',
+                            style: theme.textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.w700,
-                              letterSpacing: -1.4,
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 20),
-                        if (_hasNativeDownloads) ...[
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _link,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Video link',
-                                    hintText: 'Paste a video link',
-                                    border: OutlineInputBorder(),
+                          const SizedBox(height: 10),
+                          Semantics(
+                            header: true,
+                            child: Text(
+                              'Downloads',
+                              style: theme.textTheme.displaySmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -1.6,
+                              ),
+                            ),
+                          ),
+                          if (_hasNativeDownloads) ...[
+                            const SizedBox(height: 18),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _link,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Media link',
+                                      hintText: 'Paste a post or file link',
+                                      prefixIcon: Icon(Icons.link_rounded),
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    keyboardType: TextInputType.url,
+                                    textInputAction: TextInputAction.done,
+                                    onSubmitted: (_) => _addLink(),
                                   ),
-                                  keyboardType: TextInputType.url,
-                                  textInputAction: TextInputAction.done,
-                                  onSubmitted: (_) => _addLink(),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              FilledButton(
-                                onPressed: _adding ? null : _addLink,
-                                child: const Text('Add link'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 24),
-                        ],
-                        Divider(
-                          height: 1,
-                          color: colors.primary.withValues(alpha: 0.15),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (_inboxUnavailable)
-                  const SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text('Shared links are unavailable.'),
-                    ),
-                  )
-                else if (_sharedLinks.isNotEmpty)
-                  SliverList.builder(
-                    itemCount: _sharedLinks.length,
-                    itemBuilder: (context, index) {
-                      final link = _sharedLinks[index];
-                      final state = link['state'];
-                      final id = link['id'] as String;
-                      final progress = link['progress'] as num?;
-                      final status = switch (state) {
-                        'downloading' when progress != null =>
-                          'Downloading · ${(progress * 100).round()}%',
-                        'downloading' => 'Downloading',
-                        'saved' => 'Saved',
-                        'failed' => 'Download failed',
-                        'cancelled' => 'Cancelled',
-                        _ => 'Pending download',
-                      };
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                        ),
-                        title: Text(
-                          link['url'] as String,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(status),
-                        trailing: switch (state) {
-                          'saved' => Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: 'Play video',
-                                onPressed: () => _playVideo(id),
-                                icon: const Icon(Icons.play_arrow_rounded),
-                              ),
-                              if (link['canExport'] == true &&
-                                  defaultTargetPlatform == TargetPlatform.iOS)
-                                PopupMenuButton<String>(
-                                  tooltip: 'Export video',
-                                  onSelected: (action) =>
-                                      _queueAction(action, id),
-                                  itemBuilder: (_) => const [
-                                    PopupMenuItem(
-                                      value: 'saveToPhotos',
-                                      child: Text('Save to Photos'),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'exportToFiles',
-                                      child: Text('Save to Files'),
-                                    ),
-                                  ],
-                                )
-                              else if (link['canExport'] == true)
-                                IconButton(
-                                  tooltip: 'Save to Gallery',
-                                  onPressed: () => _queueAction('export', id),
-                                  icon: const Icon(Icons.save_alt_rounded),
+                                const SizedBox(width: 10),
+                                FilledButton(
+                                  onPressed: _adding ? null : _addLink,
+                                  child: const Text('Add link'),
                                 ),
-                            ],
-                          ),
-                          'downloading' when link['canCancel'] == true =>
-                            IconButton(
-                              tooltip: 'Cancel download',
-                              onPressed: () => _queueAction('cancel', id),
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                          'failed' || 'cancelled'
-                              when link['canRetry'] == true =>
-                            IconButton(
-                              tooltip: 'Retry download',
-                              onPressed: () {
-                                final url = Uri.tryParse(link['url'] as String);
-                                if (isSocialVideo(url)) {
-                                  _downloadPost(url!, replacing: id);
-                                } else {
-                                  _queueAction('retry', id);
-                                }
-                              },
-                              icon: const Icon(Icons.refresh_rounded),
-                            ),
-                          'pending'
-                              when isSocialVideo(
-                                Uri.tryParse(link['url'] as String),
-                              ) =>
-                            IconButton(
-                              tooltip: 'Download video',
-                              onPressed: _adding
-                                  ? null
-                                  : () => _downloadPost(
-                                      Uri.parse(link['url'] as String),
-                                      replacing: id,
-                                    ),
-                              icon: const Icon(Icons.download_rounded),
-                            ),
-                          _ => null,
-                        },
-                      );
-                    },
-                  )
-                else
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: colors.secondary,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Icon(
-                                  Icons.download_rounded,
-                                  size: 28,
-                                  color: colors.onSecondary,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No downloads yet',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: colors.primary,
-                              ),
+                              ],
                             ),
                           ],
-                        ),
+                          const SizedBox(height: 16),
+                          const Divider(height: 1),
+                        ],
                       ),
                     ),
                   ),
-              ],
+                  if (_inboxUnavailable || _sharedLinks.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Center(
+                        child: Text(
+                          _inboxUnavailable
+                              ? 'Downloads are unavailable.'
+                              : 'No downloads yet',
+                        ),
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                      sliver:
+                          constraints.maxWidth >= 820 &&
+                              MediaQuery.textScalerOf(context).scale(16) <= 20
+                          ? SliverGrid.builder(
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 2,
+                                    mainAxisExtent: 98,
+                                    crossAxisSpacing: 24,
+                                    mainAxisSpacing: 12,
+                                  ),
+                              itemCount: _sharedLinks.length,
+                              itemBuilder: (_, index) =>
+                                  _downloadRow(_sharedLinks[index]),
+                            )
+                          : SliverList.builder(
+                              itemCount: _sharedLinks.length,
+                              itemBuilder: (_, index) => Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: _downloadRow(_sharedLinks[index]),
+                              ),
+                            ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

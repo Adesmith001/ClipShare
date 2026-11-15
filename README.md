@@ -21,9 +21,9 @@ For a failure check, share an MP4 URL that returns an error page. ClipShare shou
 
 ## Manage downloads
 
-Paste a supported video URL into **Video link** and tap **Add link**. An active or saved download for the same URL stays in the queue once. ClipShare shows percentages when the transfer reports a total size. Use **Retry download** for failed or cancelled entries. Android can cancel active transfers. On iOS, Cancel appears for transfers started in the current ClipShare session. Transfers started in the Share Extension continue under iOS background scheduling.
+Paste a supported URL into **Media link** and tap **Add link**. The library shows thumbnails, post titles when available, and download status. Direct HTTPS JPEG and PNG links, Pinterest photo Pins, public standalone Instagram photo posts, and photos from public X posts use the same queue. ClipShare saves one item per post. Tap a saved thumbnail to play the video or view the image. Use **Retry download** for failed or cancelled entries. Android can cancel active transfers. On iOS, Cancel appears for transfers started in the current ClipShare session. Transfers started in the Share Extension continue under iOS background scheduling.
 
-Use **Save to Gallery** on Android 10 or later. On iOS, open **Export video** and choose **Save to Photos** or **Save to Files**. ClipShare keeps its local copy if you dismiss the export picker or decline Photos access.
+Use **Save to Gallery** on Android 10 or later. On iOS, open the item's export menu and choose **Save to Photos** or **Save to Files**. ClipShare keeps its local copy if you dismiss the export picker or decline Photos access.
 
 ## Build and install on iPhone
 

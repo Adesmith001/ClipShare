@@ -21,13 +21,13 @@ class ShareActivity : Activity() {
             .setOnDismissListener { finish() }
 
         if (url == null) {
-            dialog.setMessage("Share a direct HTTPS MP4 link to download a video.")
+            dialog.setMessage("Share a direct HTTPS MP4, JPEG, or PNG link.")
         } else {
-            dialog.setMessage("Download the video from ${url.host}?")
+            dialog.setMessage("Download from ${url.host}?")
                 .setPositiveButton("Download") { _, _ ->
                     val message = try {
                         if (AndroidDownloads(this).enqueue(url)) "Download started"
-                        else "This video is already in Downloads"
+                        else "This item is already in Downloads"
                     } catch (error: Exception) {
                         "Couldn’t start the download"
                     }
@@ -49,7 +49,7 @@ class ShareActivity : Activity() {
         val matcher = Patterns.WEB_URL.matcher(text)
         while (matcher.find()) {
             val url = Uri.parse(matcher.group())
-            if (AndroidDownloads.directVideo(url)) {
+            if (AndroidDownloads.directVideo(url) || AndroidDownloads.imageExtension(url) != null) {
                 return url.normalizeScheme()
             }
         }

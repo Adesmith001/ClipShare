@@ -3,12 +3,15 @@ package com.adesmith001.clipshare
 import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Environment
 import android.os.Build
 import android.provider.MediaStore
 import java.io.IOException
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 internal class AndroidDownloads(private val context: Context) {
@@ -19,6 +22,16 @@ internal class AndroidDownloads(private val context: Context) {
             url.scheme.equals("https", ignoreCase = true) &&
                 !url.host.isNullOrEmpty() && url.userInfo == null &&
                 url.path?.endsWith(".mp4", ignoreCase = true) == true
+
+        fun imageExtension(url: Uri): String? {
+            if (!url.scheme.equals("https", ignoreCase = true) ||
+                url.host.isNullOrEmpty() || url.userInfo != null) return null
+            return when (url.path?.substringAfterLast('.')?.lowercase()) {
+                "jpg", "jpeg" -> "jpg"
+                "png" -> "png"
+                else -> null
+            }
+        }
 
         private fun downloadKey(url: Uri): String = url.normalizeScheme().buildUpon()
             .encodedAuthority(url.encodedAuthority?.lowercase())
@@ -34,7 +47,7 @@ internal class AndroidDownloads(private val context: Context) {
         queue(url)
     }
 
-    fun enqueueResolved(url: Uri, source: Uri, replacing: Long?): Boolean =
+    fun enqueueResolved(url: Uri, source: Uri, replacing: Long?, title: String?): Boolean =
         synchronized(changeLock) {
             if (replacing != null) {
                 val previous = entries(setOf(replacing)).singleOrNull()
@@ -42,12 +55,15 @@ internal class AndroidDownloads(private val context: Context) {
                     return@synchronized false
                 }
             }
-            queue(url, replacing, source)
+            queue(url, replacing, source, title)
         }
 
-    private fun queue(url: Uri, replacing: Long? = null, original: Uri = url): Boolean {
+    private fun queue(
+        url: Uri, replacing: Long? = null, original: Uri = url, title: String? = null
+    ): Boolean {
+        val image = imageExtension(url)
         require(
-            directVideo(url) ||
+            image != null || directVideo(url) ||
                 (original != url && url.scheme == "https" && url.userInfo == null &&
                     url.host?.endsWith(".googlevideo.com") == true && url.path == "/videoplayback" &&
                     url.getQueryParameter("mime") == "video/mp4")
@@ -63,13 +79,18 @@ internal class AndroidDownloads(private val context: Context) {
         }
 
         val request = DownloadManager.Request(url.normalizeScheme())
-            .setTitle("ClipShare video")
+            .setTitle(title ?: "ClipShare download")
             .setDestinationInExternalFilesDir(
-                context, Environment.DIRECTORY_MOVIES, "${UUID.randomUUID()}.mp4"
+                context, directory(image), "${UUID.randomUUID()}.${image ?: "mp4"}"
             )
         val id = manager.enqueue(request)
         val edit = history.edit().putString(id.toString(), source)
-        if (replacing != null) edit.remove(replacing.toString()).remove("cancelled:$replacing")
+        if (image != null) edit.putString("image:$id", image)
+        if (title != null) edit.putString("title:$id", title)
+        if (replacing != null) {
+            edit.remove(replacing.toString()).remove("cancelled:$replacing")
+                .remove("image:$replacing").remove("title:$replacing")
+        }
         if (!edit.commit()) {
             manager.remove(id)
             throw IOException("Could not record the download.")
@@ -114,7 +135,7 @@ internal class AndroidDownloads(private val context: Context) {
             while (row.moveToNext()) {
                 val id = row.getLong(idColumn)
                 states[id] = when (row.getInt(statusColumn)) {
-                    DownloadManager.STATUS_SUCCESSFUL -> if (isVideo(id)) "saved" else "failed"
+                    DownloadManager.STATUS_SUCCESSFUL -> if (validMedia(id)) "saved" else "failed"
                     DownloadManager.STATUS_FAILED -> "failed"
                     else -> "downloading"
                 }
@@ -133,21 +154,26 @@ internal class AndroidDownloads(private val context: Context) {
                 put("canCancel", state == "downloading")
                 put("canRetry", state == "cancelled" || state == "failed")
                 put("canExport", state == "saved" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                put("isImage", imageType(id) != null)
+                history.getString("title:$id", null)?.let { put("title", it) }
                 progress[id]?.let { put("progress", it) }
             }
         }
     }
 
     fun export(id: Long): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || videoUri(id) == null) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !tracks(id) || !validMedia(id)) return false
+        val image = imageType(id)
+        val collection = if (image == null) MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val resolver = context.contentResolver
         val fields = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "ClipShare-$id.mp4")
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/ClipShare")
-            put(MediaStore.Video.Media.IS_PENDING, 1)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "ClipShare-$id.${image ?: "mp4"}")
+            put(MediaStore.MediaColumns.MIME_TYPE, if (image == null) "video/mp4" else imageMime(image))
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${directory(image)}/ClipShare")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        val destination = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, fields)
+        val destination = resolver.insert(collection, fields)
             ?: throw IOException("Could not create a Gallery entry.")
         try {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(manager.openDownloadedFile(id)).use { input ->
@@ -156,7 +182,7 @@ internal class AndroidDownloads(private val context: Context) {
                 output.use { input.copyTo(it) }
             }
             fields.clear()
-            fields.put(MediaStore.Video.Media.IS_PENDING, 0)
+            fields.put(MediaStore.MediaColumns.IS_PENDING, 0)
             if (resolver.update(destination, fields, null, null) != 1) {
                 throw IOException("Could not publish the Gallery entry.")
             }
@@ -168,10 +194,66 @@ internal class AndroidDownloads(private val context: Context) {
     }
 
     fun videoUri(id: Long): Uri? =
-        if (tracks(id) && isVideo(id)) manager.getUriForDownloadedFile(id) else null
+        if (tracks(id) && imageType(id) == null && validMedia(id)) manager.getUriForDownloadedFile(id) else null
 
-    private fun isVideo(id: Long): Boolean {
+    private fun imageType(id: Long): String? = history.getString("image:$id", null)
+
+    private fun directory(image: String?): String =
+        if (image == null) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+
+    private fun imageMime(image: String): String =
+        if (image == "png") "image/png" else "image/jpeg"
+
+    private fun imageBitmap(id: Long, image: String, size: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        manager.openDownloadedFile(id).use { BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, bounds) }
+        if (bounds.outMimeType != imageMime(image) || bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / inSampleSize > size * 2) inSampleSize *= 2
+        }
+        return manager.openDownloadedFile(id).use {
+            BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)
+        }
+    }
+
+    fun thumbnail(id: Long, size: Int): ByteArray? {
+        if (!tracks(id)) return null
         return try {
+            val image = imageType(id)
+            val bitmap = if (image != null) imageBitmap(id, image, size) else {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return null
+                manager.openDownloadedFile(id).use { file ->
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(file.fileDescriptor)
+                        retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, size, size)
+                    } finally {
+                        retriever.release()
+                    }
+                }
+            } ?: return null
+            try {
+                ByteArrayOutputStream().use { stream ->
+                    if (bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)) stream.toByteArray()
+                    else null
+                }
+            } finally {
+                bitmap.recycle()
+            }
+        } catch (error: Exception) {
+            null
+        }
+    }
+
+    private fun validMedia(id: Long): Boolean {
+        return try {
+            val image = imageType(id)
+            if (image != null) {
+                val bitmap = imageBitmap(id, image, 32) ?: return false
+                bitmap.recycle()
+                return true
+            }
             manager.openDownloadedFile(id).use { file ->
                 val retriever = MediaMetadataRetriever()
                 try {

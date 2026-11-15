@@ -13,6 +13,8 @@ enum SharedLinks {
     let url: String
     var state: State
     var progress: Double? = nil
+    var imageExtension: String? = nil
+    var title: String? = nil
 
     var channelValue: [String: Any] {
       var value: [String: Any] = [
@@ -22,6 +24,8 @@ enum SharedLinks {
         "canExport": state == .saved,
       ]
       if let progress { value["progress"] = progress }
+      if imageExtension != nil { value["isImage"] = true }
+      if let title { value["title"] = title }
       return value
     }
   }
@@ -38,6 +42,15 @@ enum SharedLinks {
   static func isDirectVideo(_ url: URL) -> Bool {
     webURL(url) != nil && url.scheme?.lowercased() == "https" &&
       url.pathExtension.lowercased() == "mp4"
+  }
+
+  static func imageExtension(_ url: URL) -> String? {
+    guard webURL(url) != nil, url.scheme?.lowercased() == "https" else { return nil }
+    switch url.pathExtension.lowercased() {
+    case "jpg", "jpeg": return "jpg"
+    case "png": return "png"
+    default: return nil
+    }
   }
 
   static func isResolvedVideo(_ url: URL) -> Bool {
@@ -74,9 +87,13 @@ enum SharedLinks {
     return try work()
   }
 
-  static func enqueue(_ url: URL, state: Entry.State = .pending) throws -> Entry {
+  static func enqueue(
+    _ url: URL, state: Entry.State = .pending, imageExtension: String? = nil, title: String? = nil
+  ) throws -> Entry {
     let id = String(format: "%020.0f", Date().timeIntervalSince1970 * 1_000) + "-" + UUID().uuidString
-    let entry = Entry(id: id, url: url.absoluteString, state: state)
+    let entry = Entry(
+      id: id, url: url.absoluteString, state: state, imageExtension: imageExtension, title: title
+    )
     try save(entry)
     return entry
   }

@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import ImageIO
 
 final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
   static let sessionPrefix = "com.adesmith001.clipshare.share-download."
@@ -28,10 +29,12 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
   }
 
   static func start(
-    _ url: URL, inApp: Bool = false, source: URL? = nil, replacingID: String? = nil
+    _ url: URL, inApp: Bool = false, source: URL? = nil, replacingID: String? = nil,
+    title: String? = nil
   ) throws -> Bool {
     let isVideo = source == nil ? SharedLinks.isDirectVideo(url) : SharedLinks.isResolvedVideo(url)
-    guard isVideo else { throw URLError(.unsupportedURL) }
+    let imageExtension = SharedLinks.imageExtension(url)
+    guard isVideo || imageExtension != nil else { throw URLError(.unsupportedURL) }
     return try SharedLinks.withQueueLock {
       let original = source ?? url
       let key = SharedLinks.downloadKey(original)
@@ -57,7 +60,9 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
         }
       }
 
-      let entry = try SharedLinks.enqueue(original, state: .downloading)
+      let entry = try SharedLinks.enqueue(
+        original, state: .downloading, imageExtension: imageExtension, title: title
+      )
       if let replacedFile {
         do {
           try FileManager.default.removeItem(at: replacedFile)
@@ -123,13 +128,28 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
   func urlSession(
     _ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL
   ) {
-    guard (try? SharedLinks.entry(id).state) == .downloading else { return }
+    guard let entry = try? SharedLinks.entry(id), entry.state == .downloading else { return }
     let staging: URL
     do {
       guard let response = downloadTask.response as? HTTPURLResponse,
             (200..<300).contains(response.statusCode),
-            response.url?.scheme?.lowercased() == "https",
-            ["video/mp4", "application/mp4", "application/octet-stream"].contains(response.mimeType ?? "")
+            response.url?.scheme?.lowercased() == "https"
+      else { throw URLError(.badServerResponse) }
+      if let ext = entry.imageExtension {
+        let type = ext == "png" ? "public.png" : "public.jpeg"
+        guard let source = CGImageSourceCreateWithURL(location as CFURL, nil),
+              CGImageSourceGetType(source).map({ $0 as String }) == type,
+              CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 32,
+              ] as CFDictionary) != nil
+        else { throw URLError(.cannotDecodeContentData) }
+        let destination = try SharedLinks.file(id, suffix: ext)
+        try FileManager.default.moveItem(at: location, to: destination)
+        finish(.saved)
+        return
+      }
+      guard ["video/mp4", "application/mp4", "application/octet-stream"].contains(response.mimeType ?? "")
       else { throw URLError(.badServerResponse) }
       // URLSession removes its temporary file when this delegate method returns.
       staging = try SharedLinks.file(id, suffix: "staging.mp4")

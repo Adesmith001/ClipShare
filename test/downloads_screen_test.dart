@@ -5,6 +5,46 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  testWidgets('shows a photo title and exports the saved image', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    const channel = MethodChannel('clipshare/shared_links');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    Object? exported;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'saveToPhotos') {
+        exported = call.arguments;
+        return true;
+      }
+      if (call.method != 'list') return null;
+      return [
+        {
+          'id': 'photo',
+          'url': 'https://www.pinterest.com/pin/123/',
+          'title': 'A quiet morning',
+          'isImage': true,
+          'canExport': true,
+          'state': 'saved',
+        },
+      ];
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = null;
+    });
+    await tester.pumpWidget(const ClipShareApp());
+    await tester.pumpAndSettle();
+    expect(find.text('A quiet morning'), findsOneWidget);
+    expect(find.text('Pinterest'), findsOneWidget);
+    expect(find.byTooltip('View image'), findsOneWidget);
+    await tester.tap(find.byTooltip('Export image'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save to Photos'));
+    await tester.pumpAndSettle();
+    expect(exported, 'photo');
+  });
+
   testWidgets('submits a pasted URL and refreshes the queue', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     const channel = MethodChannel('clipshare/shared_links');

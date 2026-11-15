@@ -56,7 +56,8 @@ final class ShareViewController: UIViewController {
           message.text = url.absoluteString
           message.lineBreakMode = .byTruncatingMiddle
           message.numberOfLines = 3
-          saveButton.setTitle(SharedLinks.isDirectVideo(url) ? "Download" : "Add to ClipShare", for: .normal)
+          let direct = SharedLinks.isDirectVideo(url) || SharedLinks.imageExtension(url) != nil
+          saveButton.setTitle(direct ? "Download" : "Add to ClipShare", for: .normal)
           saveButton.isEnabled = true
           return
         }
@@ -78,9 +79,9 @@ final class ShareViewController: UIViewController {
   @objc private func save() {
     guard let sharedURL else { return }
     do {
-      if SharedLinks.isDirectVideo(sharedURL) {
+      if SharedLinks.isDirectVideo(sharedURL) || SharedLinks.imageExtension(sharedURL) != nil {
         guard try BackgroundDownloads.start(sharedURL) else {
-          message.text = "This video is already in Downloads."
+          message.text = "This item is already in Downloads."
           saveButton.isEnabled = false
           return
         }
