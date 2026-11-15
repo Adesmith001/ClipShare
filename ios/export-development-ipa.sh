@@ -91,7 +91,7 @@ unzip -q "${ipas[0]}" -d "$work_dir/export"
 app="$work_dir/export/Payload/Runner.app"
 codesign --verify --deep --strict "$app"
 for bundle in "$app" "$app/PlugIns/ShareExtension.appex"; do
-  codesign -d --entitlements - "$bundle" > "$work_dir/entitlements.plist"
+  codesign -d --entitlements - --xml "$bundle" > "$work_dir/entitlements.plist"
   group=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$work_dir/entitlements.plist")
   [[ "$group" = group.com.adesmith001.clipshare ]]
 done
