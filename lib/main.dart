@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 const plum = Color(0xFF302435);
@@ -30,8 +32,46 @@ class ClipShareApp extends StatelessWidget {
   }
 }
 
-class DownloadsScreen extends StatelessWidget {
+class DownloadsScreen extends StatefulWidget {
   const DownloadsScreen({super.key});
+
+  @override
+  State<DownloadsScreen> createState() => _DownloadsScreenState();
+}
+
+class _DownloadsScreenState extends State<DownloadsScreen> {
+  static const _channel = MethodChannel('clipshare/shared_links');
+  late final AppLifecycleListener _lifecycle;
+  List<String> _sharedLinks = const [];
+  bool _inboxUnavailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = AppLifecycleListener(onResume: _refreshSharedLinks);
+    _refreshSharedLinks();
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshSharedLinks() async {
+    if (defaultTargetPlatform != TargetPlatform.iOS || kIsWeb) return;
+    try {
+      final links = await _channel.invokeListMethod<String>('list') ?? [];
+      if (!mounted) return;
+      setState(() {
+        _sharedLinks = links;
+        _inboxUnavailable = false;
+      });
+    } on PlatformException {
+      if (!mounted) return;
+      setState(() => _inboxUnavailable = true);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -79,41 +119,64 @@ class DownloadsScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Center(
+                if (_inboxUnavailable)
+                  const SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: colors.secondary,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Icon(
-                                Icons.download_rounded,
-                                size: 28,
-                                color: colors.onSecondary,
+                      padding: EdgeInsets.all(24),
+                      child: Text('Shared links are unavailable.'),
+                    ),
+                  )
+                else if (_sharedLinks.isNotEmpty)
+                  SliverList.builder(
+                    itemCount: _sharedLinks.length,
+                    itemBuilder: (context, index) => ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                      ),
+                      title: Text(
+                        _sharedLinks[index],
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: const Text('Pending download'),
+                    ),
+                  )
+                else
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: colors.secondary,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Icon(
+                                  Icons.download_rounded,
+                                  size: 28,
+                                  color: colors.onSecondary,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No downloads yet',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: colors.primary,
+                            const SizedBox(height: 16),
+                            Text(
+                              'No downloads yet',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: colors.primary,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),

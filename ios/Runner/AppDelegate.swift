@@ -12,5 +12,20 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let channel = FlutterMethodChannel(
+      name: "clipshare/shared_links",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "list" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      do {
+        result(try SharedLinks.pending())
+      } catch {
+        result(FlutterError(code: "shared_links_unavailable", message: nil, details: nil))
+      }
+    }
   }
 }
