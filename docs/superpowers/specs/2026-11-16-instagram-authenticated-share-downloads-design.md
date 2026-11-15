@@ -31,7 +31,7 @@ The first sign-in and any later reauthentication occur in the share sheet. Norma
 
 - **`ShareViewController`** receives the shared URL, checks the extension's Instagram session, and coordinates sign-in, resolve, and queue states.
 - **A native Instagram resolver in the Share Extension target** requests the shared post using the extension's session, parses the matching post data, and returns a caption/title plus ordered media URLs. It supports a single Reel/video, a single photo, and mixed or all-photo/all-video carousels. Unsupported or unavailable slide entries are skipped while preserving their original slide numbering.
-- **`WKWebsiteDataStore`** owns the persistent Instagram website session. The extension uses WebKit's cookie store to authorize Instagram page/API requests. Authentication cookies stay on-device and are never included in ClipShare logs or sent to a ClipShare backend. Requests to Instagram's CDN use the media URL without forwarding Instagram authentication cookies.
+- **`WKWebsiteDataStore`** owns the persistent Instagram website session. The extension loads Instagram post pages in its `WKWebView`, letting WebKit attach the session itself, then reads the rendered page's embedded media data. ClipShare does not extract, copy, or persist raw session cookies outside WebKit. Requests to Instagram's CDN use the media URL without forwarding Instagram authentication cookies.
 - **Existing `SharedLinks` and `BackgroundDownloads`** persist queue entries and download media to the App Group container. The extension closes after all supported items have been queued; the existing Downloads screen displays progress and results.
 
 The Flutter resolver remains responsible for Android and manual links added in the app. iOS shares use the native resolver so the authenticated WebKit session can be used within the extension process.
@@ -39,7 +39,7 @@ The Flutter resolver remains responsible for Android and manual links added in t
 ## Session and failure handling
 
 - ClipShare never asks the user to enter an Instagram password into a ClipShare-owned form. The user interacts with Instagram's first-party sign-in page.
-- The website session persists in the Share Extension's WebKit store. It is not copied into shared files or sent to a service. A **Disconnect Instagram** action in the extension clears Instagram website data from that store.
+- The website session persists in the Share Extension's WebKit store. It is not copied into shared files or sent to a service. A **Disconnect Instagram** action in the extension removes Instagram cookies and website data from that store.
 - Login challenges, account checkpoints, rate limits, private posts, deleted posts, and unavailable media produce a clear message and do not create false `Saved` entries.
 - When an Instagram session is invalid, the extension offers reauthentication and retries the shared URL once sign-in completes. Session persistence is subject to Instagram's expiry and revocation rules; ClipShare cannot promise a sign-in will last indefinitely.
 - Media downloads continue using the existing background download sessions and remain visible in ClipShare's shared Downloads library.
