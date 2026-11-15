@@ -20,6 +20,7 @@ permissions:
 
 jobs:
   build:
+    if: (github.event_name == 'push' && !github.event.repository.private) || (github.event_name == 'workflow_dispatch' && !inputs.signed)
     runs-on: macos-26
     timeout-minutes: 25
     steps:
@@ -40,10 +41,8 @@ jobs:
 
   sign:
     if: github.event_name == 'workflow_dispatch' && inputs.signed && github.ref == 'refs/heads/main'
-    needs: build
     runs-on: macos-26
     timeout-minutes: 25
-    environment: ios-signing
     steps:
       - name: Check artifact visibility
         env:

@@ -27,11 +27,11 @@ Use **Save to Gallery** on Android 10 or later. On iOS, open **Export video** an
 
 ## Build and install on iPhone
 
-The **iOS build** workflow compiles Runner and checks that the Share Extension is embedded. For an installable IPA, use a private GitHub repository and create an Actions environment named `ios-signing`.
+The **iOS build** workflow compiles Runner and checks that the Share Extension is embedded. Run the signed build from a private GitHub repository so the IPA and its embedded device profiles are available only to users with repository access.
 
 1. Register the iPhone with your Apple development team. Enable `group.com.adesmith001.clipshare` on the explicit App IDs `com.adesmith001.clipshare` and `com.adesmith001.clipshare.ShareExtension`.
 2. Create an Apple Development signing certificate and a development provisioning profile for each App ID. Include the iPhone and the App Group in both profiles.
-3. Set the environment variable `APPLE_TEAM_ID` in the GitHub Actions environment. Add the secrets `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_RUNNER_PROFILE_BASE64`, and `IOS_EXTENSION_PROFILE_BASE64`. Use base64 for the exported certificate with its private key (`.p12`) and the two `.mobileprovision` files.
+3. Under **Settings → Secrets and variables → Actions** in the private repository, set the repository variable `APPLE_TEAM_ID`. Add the repository secrets `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_RUNNER_PROFILE_BASE64`, and `IOS_EXTENSION_PROFILE_BASE64`. Use base64 for the exported certificate with its private key (`.p12`) and the two `.mobileprovision` files.
 4. In **Actions → iOS build → Run workflow**, turn on **Export a signed development IPA**. Download the `ClipShare-development-ipa` artifact and enable Developer Mode on the iPhone if prompted.
 5. Try `xtool install <path-to-ipa>` from WSL with the iPhone paired over USB. If re-signing changes the App Group, use `ideviceinstaller install <path-to-ipa>` to install the CI-signed IPA directly.
 
