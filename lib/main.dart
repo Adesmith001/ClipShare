@@ -221,10 +221,11 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       }
       await _refreshSharedLinks();
     } on InstagramSignInRequired {
-      if (mounted)
+      if (mounted) {
         _showMessage(
           'Instagram requires sign-in for this request. Try again later.',
         );
+      }
     } on FormatException {
       if (mounted) _showMessage('This post has no supported image or video.');
     } on PlatformException {
