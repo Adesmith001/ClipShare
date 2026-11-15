@@ -19,6 +19,12 @@ Open a direct HTTPS link whose path ends in `.mp4` in a browser or messaging app
 
 For a failure check, share an MP4 URL that returns an error page. ClipShare should show **Download failed**. Sharing a post page shows the prompt to use a direct MP4 link.
 
+## Manage downloads
+
+Paste a direct HTTPS MP4 URL into **Video link** and tap **Add link**. An active or saved download for the same URL stays in the queue once. ClipShare shows percentages when the transfer reports a total size. Use **Retry download** for failed or cancelled entries. Android can cancel active transfers. On iOS, Cancel appears for transfers started in the current ClipShare session. Transfers started in the Share Extension continue under iOS background scheduling.
+
+Use **Save to Gallery** on Android 10 or later. On iOS, open **Export video** and choose **Save to Photos** or **Save to Files**. ClipShare keeps its local copy if you dismiss the export picker or decline Photos access.
+
 ## Build and install on iPhone
 
 The **iOS build** workflow compiles Runner and checks that the Share Extension is embedded. For an installable IPA, use a private GitHub repository and create an Actions environment named `ios-signing`.

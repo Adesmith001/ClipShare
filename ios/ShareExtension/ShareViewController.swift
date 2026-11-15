@@ -79,7 +79,11 @@ final class ShareViewController: UIViewController {
     guard let sharedURL else { return }
     do {
       if SharedLinks.isDirectVideo(sharedURL) {
-        try BackgroundDownloads.start(sharedURL)
+        guard try BackgroundDownloads.start(sharedURL) else {
+          message.text = "This video is already in Downloads."
+          saveButton.isEnabled = false
+          return
+        }
       } else {
         _ = try SharedLinks.enqueue(sharedURL)
       }

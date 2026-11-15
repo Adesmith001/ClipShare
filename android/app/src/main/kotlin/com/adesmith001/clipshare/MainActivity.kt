@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -49,6 +50,28 @@ class MainActivity : FlutterActivity() {
                                 startActivity(Intent(this, VideoActivity::class.java).setData(uri))
                                 result.success(null)
                             }
+                        }
+                    }
+                    "add", "cancel", "retry", "export" -> {
+                        val argument = call.arguments as? String
+                        if (argument == null) {
+                            result.error("invalid_argument", null, null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            if (call.method == "add") {
+                                result.success(downloads.enqueue(Uri.parse(argument)))
+                            } else {
+                                val id = argument.toLong()
+                                val completed = when (call.method) {
+                                    "cancel" -> downloads.cancel(id)
+                                    "retry" -> downloads.retry(id)
+                                    else -> downloads.export(id)
+                                }
+                                result.success(completed)
+                            }
+                        } catch (error: Exception) {
+                            result.error("download_action_failed", null, null)
                         }
                     }
                     else -> result.notImplemented()

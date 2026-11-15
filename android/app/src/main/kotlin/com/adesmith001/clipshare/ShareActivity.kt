@@ -26,8 +26,8 @@ class ShareActivity : Activity() {
             dialog.setMessage("Download the video from ${url.host}?")
                 .setPositiveButton("Download") { _, _ ->
                     val message = try {
-                        AndroidDownloads(this).enqueue(url)
-                        "Download started"
+                        if (AndroidDownloads(this).enqueue(url)) "Download started"
+                        else "This video is already in Downloads"
                     } catch (error: Exception) {
                         "Couldn’t start the download"
                     }
@@ -49,11 +49,7 @@ class ShareActivity : Activity() {
         val matcher = Patterns.WEB_URL.matcher(text)
         while (matcher.find()) {
             val url = Uri.parse(matcher.group())
-            if (url.scheme.equals("https", ignoreCase = true) &&
-                !url.host.isNullOrEmpty() &&
-                url.userInfo == null &&
-                url.path?.endsWith(".mp4", ignoreCase = true) == true
-            ) {
+            if (AndroidDownloads.directVideo(url)) {
                 return url.normalizeScheme()
             }
         }

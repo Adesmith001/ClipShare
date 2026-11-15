@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -42,8 +44,11 @@ class DownloadsScreen extends StatefulWidget {
 class _DownloadsScreenState extends State<DownloadsScreen> {
   static const _channel = MethodChannel('clipshare/shared_links');
   late final AppLifecycleListener _lifecycle;
+  final _link = TextEditingController();
+  Timer? _progressTimer;
   List<Map<Object?, Object?>> _sharedLinks = const [];
   bool _inboxUnavailable = false;
+  bool _adding = false;
 
   bool get _hasNativeDownloads =>
       !kIsWeb &&
@@ -53,7 +58,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   @override
   void initState() {
     super.initState();
-    _lifecycle = AppLifecycleListener(onResume: _refreshSharedLinks);
+    _lifecycle = AppLifecycleListener(
+      onResume: _refreshSharedLinks,
+      onInactive: () => _progressTimer?.cancel(),
+    );
     if (_hasNativeDownloads) {
       _channel.setMethodCallHandler((call) async {
         if (call.method == 'changed') await _refreshSharedLinks();
@@ -65,6 +73,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   @override
   void dispose() {
     _lifecycle.dispose();
+    _progressTimer?.cancel();
+    _link.dispose();
     if (_hasNativeDownloads) _channel.setMethodCallHandler(null);
     super.dispose();
   }
@@ -80,9 +90,75 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         _sharedLinks = links ?? [];
         _inboxUnavailable = false;
       });
+      if (_sharedLinks.any((entry) => entry['state'] == 'downloading') &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        if (_progressTimer?.isActive != true) {
+          _progressTimer = Timer.periodic(
+            const Duration(seconds: 2),
+            (_) => _refreshSharedLinks(),
+          );
+        }
+      } else {
+        _progressTimer?.cancel();
+      }
     } on PlatformException {
       if (!mounted) return;
       setState(() => _inboxUnavailable = true);
+    }
+  }
+
+  Future<void> _addLink() async {
+    if (_adding) return;
+    final text = _link.text.trim();
+    final url = Uri.tryParse(text);
+    if (url == null ||
+        url.scheme.toLowerCase() != 'https' ||
+        url.host.isEmpty ||
+        url.userInfo.isNotEmpty ||
+        !url.path.toLowerCase().endsWith('.mp4')) {
+      _showMessage('Enter a direct HTTPS MP4 link.');
+      return;
+    }
+    setState(() => _adding = true);
+    try {
+      final added = await _channel.invokeMethod<bool>('add', text);
+      if (!mounted) return;
+      _link.clear();
+      FocusScope.of(context).unfocus();
+      if (added == false) _showMessage('This video is already in Downloads.');
+      await _refreshSharedLinks();
+    } on PlatformException {
+      if (mounted) _showMessage('Couldn’t start the download.');
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _queueAction(String action, String id) async {
+    try {
+      final completed = await _channel.invokeMethod<bool>(action, id);
+      if (!mounted) return;
+      if (completed == false) _showMessage('This download has changed.');
+      if (action == 'export' && completed == true) {
+        _showMessage('Video saved to Gallery.');
+      }
+      if (action == 'saveToPhotos' && completed == true) {
+        _showMessage('Video saved to Photos.');
+      }
+      await _refreshSharedLinks();
+    } on PlatformException catch (error) {
+      if (mounted) {
+        _showMessage(
+          error.code == 'photos_denied'
+              ? 'Allow Photos access in Settings, or save to Files.'
+              : 'Couldn’t complete that action.',
+        );
+      }
     }
   }
 
@@ -135,6 +211,31 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                           ),
                         ),
                         const SizedBox(height: 20),
+                        if (_hasNativeDownloads) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _link,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Video link',
+                                    hintText: 'Paste an HTTPS MP4 link',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  keyboardType: TextInputType.url,
+                                  textInputAction: TextInputAction.done,
+                                  onSubmitted: (_) => _addLink(),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              FilledButton(
+                                onPressed: _adding ? null : _addLink,
+                                child: const Text('Add link'),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                        ],
                         Divider(
                           height: 1,
                           color: colors.primary.withValues(alpha: 0.15),
@@ -156,10 +257,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                     itemBuilder: (context, index) {
                       final link = _sharedLinks[index];
                       final state = link['state'];
+                      final id = link['id'] as String;
+                      final progress = link['progress'] as num?;
                       final status = switch (state) {
+                        'downloading' when progress != null =>
+                          'Downloading · ${(progress * 100).round()}%',
                         'downloading' => 'Downloading',
                         'saved' => 'Saved',
                         'failed' => 'Download failed',
+                        'cancelled' => 'Cancelled',
                         _ => 'Pending download',
                       };
                       return ListTile(
@@ -172,14 +278,55 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         subtitle: Text(status),
-                        trailing: state == 'saved'
-                            ? IconButton(
+                        trailing: switch (state) {
+                          'saved' => Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
                                 tooltip: 'Play video',
-                                onPressed: () =>
-                                    _playVideo(link['id'] as String),
+                                onPressed: () => _playVideo(id),
                                 icon: const Icon(Icons.play_arrow_rounded),
-                              )
-                            : null,
+                              ),
+                              if (link['canExport'] == true &&
+                                  defaultTargetPlatform == TargetPlatform.iOS)
+                                PopupMenuButton<String>(
+                                  tooltip: 'Export video',
+                                  onSelected: (action) =>
+                                      _queueAction(action, id),
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'saveToPhotos',
+                                      child: Text('Save to Photos'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'exportToFiles',
+                                      child: Text('Save to Files'),
+                                    ),
+                                  ],
+                                )
+                              else if (link['canExport'] == true)
+                                IconButton(
+                                  tooltip: 'Save to Gallery',
+                                  onPressed: () => _queueAction('export', id),
+                                  icon: const Icon(Icons.save_alt_rounded),
+                                ),
+                            ],
+                          ),
+                          'downloading' when link['canCancel'] == true =>
+                            IconButton(
+                              tooltip: 'Cancel download',
+                              onPressed: () => _queueAction('cancel', id),
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                          'failed' || 'cancelled'
+                              when link['canRetry'] == true =>
+                            IconButton(
+                              tooltip: 'Retry download',
+                              onPressed: () => _queueAction('retry', id),
+                              icon: const Icon(Icons.refresh_rounded),
+                            ),
+                          _ => null,
+                        },
                       );
                     },
                   )

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 enum SharedLinks {
@@ -5,15 +6,23 @@ enum SharedLinks {
 
   struct Entry: Codable {
     enum State: String, Codable {
-      case pending, downloading, saved, failed
+      case pending, downloading, saved, failed, cancelled
     }
 
     let id: String
     let url: String
     var state: State
+    var progress: Double? = nil
 
-    var channelValue: [String: String] {
-      ["id": id, "url": url, "state": state.rawValue]
+    var channelValue: [String: Any] {
+      var value: [String: Any] = [
+        "id": id, "url": url, "state": state.rawValue,
+        "canCancel": state == .downloading && BackgroundDownloads.canCancel(id),
+        "canRetry": state == .failed || state == .cancelled,
+        "canExport": state == .saved,
+      ]
+      if let progress { value["progress"] = progress }
+      return value
     }
   }
 
@@ -29,6 +38,27 @@ enum SharedLinks {
   static func isDirectVideo(_ url: URL) -> Bool {
     webURL(url) != nil && url.scheme?.lowercased() == "https" &&
       url.pathExtension.lowercased() == "mp4"
+  }
+
+  static func downloadKey(_ url: URL) -> String {
+    var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    parts?.scheme = parts?.scheme?.lowercased()
+    parts?.host = parts?.host?.lowercased()
+    parts?.fragment = nil
+    return parts?.string ?? url.absoluteString
+  }
+
+  static func withQueueLock<T>(_ work: () throws -> T) throws -> T {
+    let directory = try inbox()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let descriptor = open(
+      directory.appendingPathComponent(".queue-lock").path,
+      O_CREAT | O_RDWR, mode_t(S_IRUSR | S_IWUSR)
+    )
+    guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+    defer { close(descriptor) }
+    guard flock(descriptor, LOCK_EX) == 0 else { throw CocoaError(.fileWriteUnknown) }
+    return try work()
   }
 
   static func enqueue(_ url: URL, state: Entry.State = .pending) throws -> Entry {

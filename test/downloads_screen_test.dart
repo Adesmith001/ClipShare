@@ -2,8 +2,48 @@ import 'package:clipshare/main.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 
 void main() {
+  testWidgets('submits a pasted URL and refreshes the queue', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    const channel = MethodChannel('clipshare/shared_links');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    const url = 'https://example.com/video.mp4?token=example';
+    String? queued;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'add') {
+        queued = call.arguments as String;
+        return null;
+      }
+      return queued == null
+          ? []
+          : [
+              {
+                'id': '1',
+                'url': queued,
+                'state': 'downloading',
+                'progress': 0.5,
+                'canCancel': true,
+              },
+            ];
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    await tester.pumpWidget(const ClipShareApp());
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), url);
+    await tester.tap(find.text('Add link'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(queued, url);
+    expect(find.text('Downloading · 50%'), findsOneWidget);
+    expect(find.byTooltip('Cancel download'), findsOneWidget);
+  });
+
   for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
     testWidgets('only saved downloads can be played on $platform', (
       tester,
