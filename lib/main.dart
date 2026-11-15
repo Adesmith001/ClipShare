@@ -51,6 +51,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   List<Map<Object?, Object?>> _sharedLinks = const [];
   bool _inboxUnavailable = false;
   bool _adding = false;
+  String _filter = 'All';
   final _thumbnails = <String, Future<Uint8List?>>{};
 
   bool get _hasNativeDownloads =>
@@ -90,7 +91,14 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       );
       if (!mounted) return;
       setState(() {
-        _sharedLinks = links ?? [];
+        final grouped = <String, List<Map<Object?, Object?>>>{};
+        for (final link in links ?? <Map<Object?, Object?>>[]) {
+          (grouped[link['url'] as String] ??= []).add(link);
+        }
+        _sharedLinks = [
+          for (final group in grouped.values)
+            ...(group..sort((a, b) => _position(a).compareTo(_position(b)))),
+        ];
         _inboxUnavailable = false;
       });
       if (_sharedLinks.any((entry) => entry['state'] == 'downloading') &&
@@ -119,9 +127,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       return;
     }
     if (!isDirectVideo(url) && !isDirectImage(url)) {
-      _showMessage(
-        'Paste a supported post link or a direct MP4, JPEG, or PNG link.',
-      );
+      _showMessage('Paste a supported post link or a direct media link.');
       return;
     }
     setState(() => _adding = true);
@@ -139,27 +145,86 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
   }
 
-  Future<void> _downloadPost(Uri url, {String? replacing}) async {
+  static int _position(Map<Object?, Object?> entry) =>
+      int.tryParse((entry['position'] as String? ?? '').split('/').first) ?? 0;
+
+  Future<void> _downloadPost(
+    Uri url, {
+    String? replacing,
+    int? onlySlot,
+  }) async {
     if (_adding) return;
     setState(() => _adding = true);
     try {
       final resolved = isDirectImage(url)
-          ? (source: url, media: url, title: null)
+          ? (
+              source: url,
+              items: [(url: url, slot: 0, position: null)],
+              title: null,
+            )
           : await resolveSocialVideo(url);
       if (!mounted) return;
-      final added = await _channel.invokeMethod<bool>('addResolved', {
-        'source': resolved.source.toString(),
-        'media': resolved.media.toString(),
-        'replacing': ?replacing,
-        'title': ?resolved.title,
-      });
+      final items = resolved.items.where(
+        (item) => onlySlot == null || item.slot == onlySlot,
+      );
+      if (items.isEmpty) throw const FormatException('Media item unavailable.');
+      var queued = 0;
+      var failed = 0;
+      final source = resolved.source.toString();
+      for (final item in items) {
+        final old = _sharedLinks
+            .where(
+              (entry) =>
+                  entry['url'] == source &&
+                  (entry['slot'] as int? ?? 0) == item.slot &&
+                  (entry['state'] == 'failed' || entry['state'] == 'cancelled'),
+            )
+            .firstOrNull;
+        try {
+          final added = await _channel.invokeMethod<bool>('addResolved', {
+            'source': source,
+            'media': item.url.toString(),
+            'slot': item.slot.toString(),
+            'position': ?item.position,
+            'replacing': ?(replacing ?? old?['id'] as String?),
+            'title': ?resolved.title,
+          });
+          if (added == true) {
+            queued++;
+            replacing = null;
+          }
+        } on PlatformException {
+          failed++;
+        }
+        if (!mounted) return;
+      }
       if (!mounted) return;
-      if (replacing == null) {
+      if (onlySlot == null && (queued > 0 || failed == 0)) {
         _link.clear();
         FocusScope.of(context).unfocus();
       }
-      if (added == false) _showMessage('This item is already in Downloads.');
+      final total =
+          int.tryParse(items.first.position?.split('/').last ?? '') ??
+          items.length;
+      if (failed > 0) {
+        _showMessage(
+          queued == 0
+              ? 'Couldn’t start the download.'
+              : 'Queued $queued. Paste the link again to try missing items.',
+        );
+      } else if (onlySlot == null && total > items.length) {
+        _showMessage('Found ${items.length} of $total items. Added $queued.');
+      } else if (queued == 0) {
+        _showMessage('Already in Downloads.');
+      } else if (items.length > 1) {
+        _showMessage('Added $queued of ${items.length} items.');
+      }
       await _refreshSharedLinks();
+    } on InstagramSignInRequired {
+      if (mounted)
+        _showMessage(
+          'Instagram requires sign-in for this request. Try again later.',
+        );
     } on FormatException {
       if (mounted) _showMessage('This post has no supported image or video.');
     } on PlatformException {
@@ -263,6 +328,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         (filename?.isNotEmpty == true
             ? filename!
             : (source.isEmpty ? 'Shared link' : '$source post'));
+    final position = entry['position'] as String?;
     final state = entry['state'];
     final saved = state == 'saved';
     final progress = entry['progress'] as num?;
@@ -327,6 +393,25 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   ),
                 ),
               ),
+            if (position != null)
+              Align(
+                alignment: Alignment.topLeft,
+                child: Container(
+                  margin: const EdgeInsets.all(5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: plum,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    position,
+                    style: const TextStyle(color: ivory, fontSize: 11),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -345,7 +430,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               child: thumbnail,
             ),
           ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 14),
         Expanded(
           child: InkWell(
             onTap: open,
@@ -416,7 +501,13 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             tooltip: state == 'pending' ? 'Download media' : 'Retry download',
             onPressed: _adding
                 ? null
-                : () => _downloadPost(url!, replacing: id),
+                : () => _downloadPost(
+                    url!,
+                    replacing: id,
+                    onlySlot: state == 'pending'
+                        ? null
+                        : entry['slot'] as int? ?? 0,
+                  ),
             icon: Icon(
               state == 'pending'
                   ? Icons.download_rounded
@@ -436,6 +527,18 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final visible = switch (_filter) {
+      'Photos' =>
+        _sharedLinks.where((entry) => entry['isImage'] == true).toList(),
+      'Videos' =>
+        _sharedLinks
+            .where(
+              (entry) =>
+                  entry['isImage'] != true && entry['state'] != 'pending',
+            )
+            .toList(),
+      _ => _sharedLinks,
+    };
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -450,11 +553,28 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'ClipShare',
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                          Row(
+                            children: [
+                              Container(
+                                width: 30,
+                                height: 30,
+                                decoration: BoxDecoration(
+                                  color: apricot,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(
+                                  Icons.download_rounded,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'ClipShare',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 10),
                           Semantics(
@@ -474,11 +594,25 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                 Expanded(
                                   child: TextField(
                                     controller: _link,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                       labelText: 'Media link',
                                       hintText: 'Paste a post or file link',
-                                      prefixIcon: Icon(Icons.link_rounded),
-                                      border: OutlineInputBorder(),
+                                      prefixIcon: const Icon(
+                                        Icons.link_rounded,
+                                      ),
+                                      filled: true,
+                                      fillColor: apricot.withValues(
+                                        alpha: 0.18,
+                                      ),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                        borderSide: BorderSide(
+                                          color: plum.withValues(alpha: 0.2),
+                                        ),
+                                      ),
                                     ),
                                     keyboardType: TextInputType.url,
                                     textInputAction: TextInputAction.done,
@@ -494,19 +628,44 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                             ),
                           ],
                           const SizedBox(height: 16),
+                          if (_sharedLinks.isNotEmpty) ...[
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                for (final filter in [
+                                  'All',
+                                  'Photos',
+                                  'Videos',
+                                ])
+                                  ChoiceChip(
+                                    label: Text(filter),
+                                    selected: _filter == filter,
+                                    showCheckmark: false,
+                                    selectedColor: apricot,
+                                    onSelected: (_) =>
+                                        setState(() => _filter = filter),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                           const Divider(height: 1),
                         ],
                       ),
                     ),
                   ),
-                  if (_inboxUnavailable || _sharedLinks.isEmpty)
+                  if (_inboxUnavailable || visible.isEmpty)
                     SliverFillRemaining(
                       hasScrollBody: false,
                       child: Center(
                         child: Text(
                           _inboxUnavailable
                               ? 'Downloads are unavailable.'
-                              : 'No downloads yet',
+                              : switch (_filter) {
+                                  'Photos' => 'No photos yet',
+                                  'Videos' => 'No videos yet',
+                                  _ => 'No downloads yet',
+                                },
                         ),
                       ),
                     )
@@ -524,15 +683,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                     crossAxisSpacing: 24,
                                     mainAxisSpacing: 12,
                                   ),
-                              itemCount: _sharedLinks.length,
+                              itemCount: visible.length,
                               itemBuilder: (_, index) =>
-                                  _downloadRow(_sharedLinks[index]),
+                                  _downloadRow(visible[index]),
                             )
                           : SliverList.builder(
-                              itemCount: _sharedLinks.length,
+                              itemCount: visible.length,
                               itemBuilder: (_, index) => Padding(
                                 padding: const EdgeInsets.only(bottom: 16),
-                                child: _downloadRow(_sharedLinks[index]),
+                                child: _downloadRow(visible[index]),
                               ),
                             ),
                     ),

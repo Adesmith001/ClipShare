@@ -14,9 +14,16 @@ bool isDirectVideo(Uri? url) =>
 
 bool isDirectImage(Uri? url) =>
     isHttpsLink(url) &&
-    RegExp(r'\.(?:jpe?g|png)$').hasMatch(url!.path.toLowerCase());
+    RegExp(r'\.(?:jpe?g|png|webp)$').hasMatch(url!.path.toLowerCase());
 
-typedef ResolvedMedia = ({Uri source, Uri media, String? title});
+typedef MediaItem = ({Uri url, int slot, String? position});
+typedef ResolvedMedia = ({Uri source, List<MediaItem> items, String? title});
+
+class InstagramSignInRequired implements Exception {
+  const InstagramSignInRequired();
+}
+
+List<MediaItem> _single(Uri url) => [(url: url, slot: 0, position: null)];
 
 final _pinPath = RegExp(r'^/pin/(?:[\w-]+--)?([0-9]+)/?$');
 final _postPath = RegExp(r'^/(?:i/web|[^/]+)/status/([0-9]+)(?:/|$)');
@@ -105,20 +112,13 @@ Future<ResolvedMedia> resolveSocialVideo(Uri url) async {
       final post = html == null
           ? null
           : _instagramPagePost(html, instagramCode);
-      final media =
-          _instagramVideo(post) ??
-          (_field(post, 'media_type') == 1
-              ? _largestImage(
-                  _field(_field(post, 'image_versions2'), 'candidates'),
-                  _instagramCdn,
-                )
-              : null);
-      if (media == null) {
+      final items = _instagramItems(post);
+      if (items.isEmpty) {
         throw const FormatException('Instagram media unavailable.');
       }
       return (
         source: source,
-        media: media,
+        items: items,
         title: _title(_field(_field(post, 'caption'), 'text')),
       );
     }
@@ -130,11 +130,11 @@ Future<ResolvedMedia> resolveSocialVideo(Uri url) async {
         'token': '1',
       });
       final post = await _requestJson(client, endpoint);
-      final media = xMp4(post) ?? _xPhoto(post);
-      if (media == null) throw const FormatException('No media on this post.');
+      final items = xMedia(post);
+      if (items.isEmpty) throw const FormatException('No media on this post.');
       return (
         source: Uri.https('x.com', '/i/web/status/$postId'),
-        media: media,
+        items: items,
         title: _title(_field(post, 'text')),
       );
     }
@@ -187,7 +187,7 @@ Future<ResolvedMedia> resolveSocialVideo(Uri url) async {
     }
     return (
       source: Uri.https('www.pinterest.com', '/pin/$id/'),
-      media: media,
+      items: _single(media),
       title:
           _title(_field(data, 'title')) ?? _title(_field(data, 'grid_title')),
     );
@@ -227,7 +227,7 @@ Future<ResolvedMedia> _resolveYouTube(String id) async {
     }
     return (
       source: Uri.https('www.youtube.com', '/watch', {'v': id}),
-      media: best.url,
+      items: _single(best.url),
       title: title,
     );
   } on VideoUnavailableException {
@@ -256,6 +256,14 @@ Future<String?> _requestText(
   headers.forEach(request.headers.set);
   final response = await request.close().timeout(_timeout);
   if (response.statusCode == HttpStatus.notFound) return null;
+  final redirect = response.headers.value(HttpHeaders.locationHeader);
+  if (endpoint.host == 'www.instagram.com' &&
+      response.statusCode >= 300 &&
+      response.statusCode < 400 &&
+      redirect != null &&
+      endpoint.resolve(redirect).path.startsWith('/accounts/login')) {
+    throw const InstagramSignInRequired();
+  }
   if (response.statusCode != HttpStatus.ok) {
     throw HttpException('Provider returned HTTP ${response.statusCode}.');
   }
@@ -271,6 +279,30 @@ Future<String?> _requestText(
 
 Uri? instagramMp4(String html, String code) =>
     _instagramVideo(_instagramPagePost(html, code));
+
+List<MediaItem> instagramMedia(String html, String code) =>
+    _instagramItems(_instagramPagePost(html, code));
+
+List<MediaItem> _instagramItems(Object? post) {
+  final slides = _field(post, 'carousel_media');
+  if (slides is! List || slides.isEmpty) {
+    if (_field(post, 'media_type') == 8) return [];
+    final media = _instagramVideo(post) ?? _instagramPhoto(post);
+    return media == null ? [] : _single(media);
+  }
+  return [
+    for (final (index, slide) in slides.indexed)
+      if ((_instagramVideo(slide) ?? _instagramPhoto(slide)) case final Uri url)
+        (url: url, slot: index, position: '${index + 1}/${slides.length}'),
+  ];
+}
+
+Uri? _instagramPhoto(Object? post) => _field(post, 'media_type') == 1
+    ? _largestImage(
+        _field(_field(post, 'image_versions2'), 'candidates'),
+        _instagramCdn,
+      )
+    : null;
 
 Object? _instagramPagePost(String html, String code) {
   for (final script in _jsonScript.allMatches(html)) {
@@ -313,18 +345,32 @@ Uri? _instagramVideo(Object? post) {
   return null;
 }
 
-Uri? _xPhoto(Object? post) {
+List<MediaItem> xMedia(Object? post) {
   final details = _field(post, 'mediaDetails');
-  if (details is! List) return null;
-  for (final item in details) {
-    if (_field(item, 'type') != 'photo') continue;
-    final value = _field(item, 'media_url_https');
-    final url = value is String ? Uri.tryParse(value) : null;
-    if (isDirectImage(url) && url!.host == 'pbs.twimg.com') {
-      return url.replace(queryParameters: {'name': 'orig'});
-    }
-  }
-  return null;
+  if (details is! List) return [];
+  final urls = [for (final item in details) _xVideo(item) ?? _xPhoto(item)];
+  // Prior versions saved only the first playable video, or the first photo.
+  final firstVideo = urls.indexWhere(isDirectVideo);
+  final legacy = firstVideo >= 0
+      ? firstVideo
+      : urls.indexWhere((url) => url != null);
+  return [
+    for (final (index, url) in urls.indexed)
+      if (url != null)
+        (
+          url: url,
+          slot: index == legacy ? 0 : index + 1,
+          position: urls.length > 1 ? '${index + 1}/${urls.length}' : null,
+        ),
+  ];
+}
+
+Uri? _xPhoto(Object? item) {
+  if (_field(item, 'type') != 'photo') return null;
+  final value = _field(item, 'media_url_https');
+  final url = value is String ? Uri.tryParse(value) : null;
+  if (!isDirectImage(url) || url!.host != 'pbs.twimg.com') return null;
+  return url.replace(queryParameters: {...url.queryParameters, 'name': 'orig'});
 }
 
 Uri? _largestImage(Object? values, bool Function(Uri) isCdn) {
@@ -376,24 +422,29 @@ Uri? xMp4(Object? json) {
   final details = _field(json, 'mediaDetails');
   if (details is! List) return null;
   for (final item in details) {
-    final variants = _field(_field(item, 'video_info'), 'variants');
-    if (variants is! List) continue;
-    Uri? selected;
-    num bestBitrate = -1;
-    for (final variant in variants) {
-      final value = _field(variant, 'url');
-      final url = value is String ? Uri.tryParse(value) : null;
-      if (!isDirectVideo(url) || url!.host != 'video.twimg.com') continue;
-      final valueBitrate = _field(variant, 'bitrate');
-      final bitrate = valueBitrate is num ? valueBitrate : 0;
-      if (bitrate > bestBitrate) {
-        selected = url;
-        bestBitrate = bitrate;
-      }
-    }
-    if (selected != null) return selected;
+    final url = _xVideo(item);
+    if (url != null) return url;
   }
   return null;
+}
+
+Uri? _xVideo(Object? item) {
+  final variants = _field(_field(item, 'video_info'), 'variants');
+  if (variants is! List) return null;
+  Uri? selected;
+  num bestBitrate = -1;
+  for (final variant in variants) {
+    final value = _field(variant, 'url');
+    final url = value is String ? Uri.tryParse(value) : null;
+    if (!isDirectVideo(url) || url!.host != 'video.twimg.com') continue;
+    final valueBitrate = _field(variant, 'bitrate');
+    final bitrate = valueBitrate is num ? valueBitrate : 0;
+    if (bitrate > bestBitrate) {
+      selected = url;
+      bestBitrate = bitrate;
+    }
+  }
+  return selected;
 }
 
 Uri? pinterestMp4(Object? json) {

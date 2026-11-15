@@ -21,7 +21,7 @@ class ShareActivity : Activity() {
             .setOnDismissListener { finish() }
 
         if (url == null) {
-            dialog.setMessage("Share a direct HTTPS MP4, JPEG, or PNG link.")
+            dialog.setMessage("Share a direct HTTPS MP4, JPEG, PNG, or WebP link.")
         } else {
             dialog.setMessage("Download from ${url.host}?")
                 .setPositiveButton("Download") { _, _ ->

@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 
 final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
   static let sessionPrefix = "com.adesmith001.clipshare.share-download."
@@ -30,7 +31,7 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
 
   static func start(
     _ url: URL, inApp: Bool = false, source: URL? = nil, replacingID: String? = nil,
-    title: String? = nil
+    title: String? = nil, slot: Int = 0, position: String? = nil
   ) throws -> Bool {
     let isVideo = source == nil ? SharedLinks.isDirectVideo(url) : SharedLinks.isResolvedVideo(url)
     let imageExtension = SharedLinks.imageExtension(url)
@@ -43,7 +44,7 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
         guard entry.state == .downloading || entry.state == .saved,
               let existing = URL(string: entry.url)
         else { return false }
-        return SharedLinks.downloadKey(existing) == key
+        return SharedLinks.downloadKey(existing) == key && (entry.slot ?? 0) == slot
       }) { return false }
 
       var replacedFile: URL?
@@ -61,7 +62,8 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
       }
 
       let entry = try SharedLinks.enqueue(
-        original, state: .downloading, imageExtension: imageExtension, title: title
+        original, state: .downloading, imageExtension: imageExtension, title: title,
+        slot: slot, position: position
       )
       if let replacedFile {
         do {
@@ -136,8 +138,8 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
             response.url?.scheme?.lowercased() == "https"
       else { throw URLError(.badServerResponse) }
       if let ext = entry.imageExtension {
-        let type = ext == "png" ? "public.png" : "public.jpeg"
-        guard let source = CGImageSourceCreateWithURL(location as CFURL, nil),
+        guard let type = UTType(filenameExtension: ext)?.identifier,
+              let source = CGImageSourceCreateWithURL(location as CFURL, nil),
               CGImageSourceGetType(source).map({ $0 as String }) == type,
               CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,

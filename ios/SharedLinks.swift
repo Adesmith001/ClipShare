@@ -15,6 +15,8 @@ enum SharedLinks {
     var progress: Double? = nil
     var imageExtension: String? = nil
     var title: String? = nil
+    var slot: Int? = nil
+    var position: String? = nil
 
     var channelValue: [String: Any] {
       var value: [String: Any] = [
@@ -26,6 +28,8 @@ enum SharedLinks {
       if let progress { value["progress"] = progress }
       if imageExtension != nil { value["isImage"] = true }
       if let title { value["title"] = title }
+      if let slot { value["slot"] = slot }
+      if let position { value["position"] = position }
       return value
     }
   }
@@ -49,6 +53,7 @@ enum SharedLinks {
     switch url.pathExtension.lowercased() {
     case "jpg", "jpeg": return "jpg"
     case "png": return "png"
+    case "webp": return "webp"
     default: return nil
     }
   }
@@ -88,11 +93,13 @@ enum SharedLinks {
   }
 
   static func enqueue(
-    _ url: URL, state: Entry.State = .pending, imageExtension: String? = nil, title: String? = nil
+    _ url: URL, state: Entry.State = .pending, imageExtension: String? = nil, title: String? = nil,
+    slot: Int? = nil, position: String? = nil
   ) throws -> Entry {
     let id = String(format: "%020.0f", Date().timeIntervalSince1970 * 1_000) + "-" + UUID().uuidString
     let entry = Entry(
-      id: id, url: url.absoluteString, state: state, imageExtension: imageExtension, title: title
+      id: id, url: url.absoluteString, state: state, imageExtension: imageExtension, title: title,
+      slot: slot, position: position
     )
     try save(entry)
     return entry

@@ -2,6 +2,56 @@ import 'package:clipshare/social_video.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('resolves each Instagram carousel slide in post order', () {
+    const html = '''
+      <script type="application/json">
+        {"xig_polaris_media":{"if_not_gated_logged_out":{
+          "code":"carousel","media_type":8,"carousel_media":[
+            {"media_type":1,"image_versions2":{"candidates":[
+              {"url":"https://media.cdninstagram.com/one.jpg","width":800,"height":600}
+            ]}},
+            {"media_type":2,"video_versions":[
+              {"url":"https://media.cdninstagram.com/two.mp4"}
+            ]},
+            {"media_type":1,"image_versions2":{"candidates":[
+              {"url":"https://media.cdninstagram.com/three.webp"}
+            ]}}
+          ]
+        }}}
+      </script>
+    ''';
+    final slides = instagramMedia(html, 'carousel');
+    expect(slides.map((slide) => slide.url.path), [
+      '/one.jpg',
+      '/two.mp4',
+      '/three.webp',
+    ]);
+    expect(slides.map((slide) => slide.position), ['1/3', '2/3', '3/3']);
+  });
+
+  test(
+    'keeps every X photo and reserves the legacy slot for the first photo',
+    () {
+      final items = xMedia({
+        'mediaDetails': [
+          for (var index = 1; index <= 3; index++)
+            {
+              'type': 'photo',
+              'media_url_https': 'https://pbs.twimg.com/media/$index.jpg',
+            },
+        ],
+      });
+      expect(items.map((item) => item.url.path), [
+        '/media/1.jpg',
+        '/media/2.jpg',
+        '/media/3.jpg',
+      ]);
+      expect(items.map((item) => item.position), ['1/3', '2/3', '3/3']);
+      expect(items.first.slot, 0);
+      expect(items.map((item) => item.slot).toSet(), hasLength(3));
+    },
+  );
+
   test('finds the requested Instagram video inside public page data', () {
     final url = Uri.parse('https://www.instagram.com/reel/abc123/');
     expect(isSocialVideo(url), isTrue);

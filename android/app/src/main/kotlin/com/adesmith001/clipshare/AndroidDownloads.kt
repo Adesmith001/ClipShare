@@ -29,6 +29,7 @@ internal class AndroidDownloads(private val context: Context) {
             return when (url.path?.substringAfterLast('.')?.lowercase()) {
                 "jpg", "jpeg" -> "jpg"
                 "png" -> "png"
+                "webp" -> "webp"
                 else -> null
             }
         }
@@ -47,7 +48,9 @@ internal class AndroidDownloads(private val context: Context) {
         queue(url)
     }
 
-    fun enqueueResolved(url: Uri, source: Uri, replacing: Long?, title: String?): Boolean =
+    fun enqueueResolved(
+        url: Uri, source: Uri, replacing: Long?, title: String?, slot: Int, position: String?
+    ): Boolean =
         synchronized(changeLock) {
             if (replacing != null) {
                 val previous = entries(setOf(replacing)).singleOrNull()
@@ -55,11 +58,12 @@ internal class AndroidDownloads(private val context: Context) {
                     return@synchronized false
                 }
             }
-            queue(url, replacing, source, title)
+            queue(url, replacing, source, title, slot, position)
         }
 
     private fun queue(
-        url: Uri, replacing: Long? = null, original: Uri = url, title: String? = null
+        url: Uri, replacing: Long? = null, original: Uri = url, title: String? = null,
+        slot: Int = 0, position: String? = null
     ): Boolean {
         val image = imageExtension(url)
         require(
@@ -71,7 +75,8 @@ internal class AndroidDownloads(private val context: Context) {
         val source = original.toString()
         val key = downloadKey(original)
         val matching = history.all.mapNotNull { (id, value) ->
-            if (value is String && downloadKey(Uri.parse(value)) == key) id.toLongOrNull()
+            if (value is String && id.toLongOrNull() != null &&
+                history.getInt("slot:$id", 0) == slot && downloadKey(Uri.parse(value)) == key) id.toLong()
             else null
         }.toSet()
         if (entries(matching).any { it["state"] == "downloading" || it["state"] == "saved" }) {
@@ -87,9 +92,12 @@ internal class AndroidDownloads(private val context: Context) {
         val edit = history.edit().putString(id.toString(), source)
         if (image != null) edit.putString("image:$id", image)
         if (title != null) edit.putString("title:$id", title)
+        edit.putInt("slot:$id", slot)
+        if (position != null) edit.putString("position:$id", position)
         if (replacing != null) {
             edit.remove(replacing.toString()).remove("cancelled:$replacing")
                 .remove("image:$replacing").remove("title:$replacing")
+                .remove("slot:$replacing").remove("position:$replacing")
         }
         if (!edit.commit()) {
             manager.remove(id)
@@ -156,6 +164,8 @@ internal class AndroidDownloads(private val context: Context) {
                 put("canExport", state == "saved" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                 put("isImage", imageType(id) != null)
                 history.getString("title:$id", null)?.let { put("title", it) }
+                put("slot", history.getInt("slot:$id", 0))
+                history.getString("position:$id", null)?.let { put("position", it) }
                 progress[id]?.let { put("progress", it) }
             }
         }
@@ -202,7 +212,11 @@ internal class AndroidDownloads(private val context: Context) {
         if (image == null) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
 
     private fun imageMime(image: String): String =
-        if (image == "png") "image/png" else "image/jpeg"
+        when (image) {
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            else -> "image/jpeg"
+        }
 
     private fun imageBitmap(id: Long, image: String, size: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

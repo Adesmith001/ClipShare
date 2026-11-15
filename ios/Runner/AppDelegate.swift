@@ -3,6 +3,7 @@ import Flutter
 import ImageIO
 import Photos
 import UIKit
+import UniformTypeIdentifiers
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -76,7 +77,8 @@ import UIKit
         do {
           result(try BackgroundDownloads.start(
             media, inApp: true, source: source, replacingID: arguments["replacing"],
-            title: arguments["title"]
+            title: arguments["title"], slot: arguments["slot"].flatMap { Int($0) } ?? 0,
+            position: arguments["position"]
           ))
         } catch {
           result(FlutterError(code: "download_action_failed", message: nil, details: nil))
@@ -173,11 +175,31 @@ import UIKit
         }
         return
       }
-      PHPhotoLibrary.shared().performChanges {
+      var resource = file
+      if file.pathExtension == "webp" {
+        let png = FileManager.default.temporaryDirectory
+          .appendingPathComponent(UUID().uuidString).appendingPathExtension("png")
+        if let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+           let output = CGImageDestinationCreateWithURL(
+            png as CFURL, UTType.png.identifier as CFString, 1, nil
+           ) {
+          CGImageDestinationAddImageFromSource(output, source, 0, nil)
+          if CGImageDestinationFinalize(output) { resource = png }
+        }
+        if resource == file {
+          try? FileManager.default.removeItem(at: png)
+          DispatchQueue.main.async {
+            result(FlutterError(code: "export_failed", message: nil, details: nil))
+          }
+          return
+        }
+      }
+      PHPhotoLibrary.shared().performChanges { [resource] in
         let request = PHAssetCreationRequest.forAsset()
         request.addResource(with: file.pathExtension == "mp4" ? .video : .photo,
-                            fileURL: file, options: nil)
-      } completionHandler: { saved, _ in
+                            fileURL: resource, options: nil)
+      } completionHandler: { [resource] saved, _ in
+        if resource != file { try? FileManager.default.removeItem(at: resource) }
         DispatchQueue.main.async {
           if saved {
             result(true)

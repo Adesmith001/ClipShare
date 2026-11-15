@@ -60,7 +60,11 @@ class MainActivity : FlutterActivity() {
                             result.error("invalid_argument", null, null)
                         } else {
                             try {
-                                result.success(downloads.enqueueResolved(media, source, replacing, call.argument<String>("title")))
+                                result.success(downloads.enqueueResolved(
+                                    media, source, replacing, call.argument<String>("title"),
+                                    call.argument<String>("slot")?.toIntOrNull() ?: 0,
+                                    call.argument<String>("position")
+                                ))
                             } catch (error: Exception) {
                                 result.error("download_action_failed", null, null)
                             }
