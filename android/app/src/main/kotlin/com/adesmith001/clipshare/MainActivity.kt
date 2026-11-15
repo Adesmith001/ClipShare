@@ -52,6 +52,20 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
+                    "addResolved" -> {
+                        val media = call.argument<String>("media")?.let(Uri::parse)
+                        val source = call.argument<String>("source")?.let(Uri::parse)
+                        val replacing = call.argument<String>("replacing")?.toLongOrNull()
+                        if (media == null || source == null) {
+                            result.error("invalid_argument", null, null)
+                        } else {
+                            try {
+                                result.success(downloads.enqueueResolved(media, source, replacing))
+                            } catch (error: Exception) {
+                                result.error("download_action_failed", null, null)
+                            }
+                        }
+                    }
                     "add", "cancel", "retry", "export" -> {
                         val argument = call.arguments as? String
                         if (argument == null) {

@@ -34,10 +34,21 @@ internal class AndroidDownloads(private val context: Context) {
         queue(url)
     }
 
-    private fun queue(url: Uri, replacing: Long? = null): Boolean {
+    fun enqueueResolved(url: Uri, source: Uri, replacing: Long?): Boolean =
+        synchronized(changeLock) {
+            if (replacing != null) {
+                val previous = entries(setOf(replacing)).singleOrNull()
+                if (previous?.get("state") !in listOf("failed", "cancelled")) {
+                    return@synchronized false
+                }
+            }
+            queue(url, replacing, source)
+        }
+
+    private fun queue(url: Uri, replacing: Long? = null, original: Uri = url): Boolean {
         require(directVideo(url))
-        val source = url.toString()
-        val key = downloadKey(url)
+        val source = original.toString()
+        val key = downloadKey(original)
         val matching = history.all.mapNotNull { (id, value) ->
             if (value is String && downloadKey(Uri.parse(value)) == key) id.toLongOrNull()
             else null

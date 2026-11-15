@@ -35,6 +35,22 @@ import UIKit
           return
         }
         result(nil)
+      case "addResolved":
+        guard let arguments = call.arguments as? [String: String],
+              let source = arguments["source"].flatMap({ URL(string: $0) }),
+              SharedLinks.webURL(source) != nil,
+              let media = arguments["media"].flatMap({ URL(string: $0) })
+        else {
+          result(FlutterError(code: "invalid_argument", message: nil, details: nil))
+          return
+        }
+        do {
+          result(try BackgroundDownloads.start(
+            media, inApp: true, source: source, replacingID: arguments["replacing"]
+          ))
+        } catch {
+          result(FlutterError(code: "download_action_failed", message: nil, details: nil))
+        }
       case "add", "retry", "cancel":
         guard let argument = call.arguments as? String else {
           result(FlutterError(code: "invalid_argument", message: nil, details: nil))
@@ -48,7 +64,7 @@ import UIKit
           case "retry":
             let entry = try SharedLinks.entry(argument)
             guard let url = URL(string: entry.url) else { throw URLError(.badURL) }
-            result(try BackgroundDownloads.start(url, inApp: true, retryID: argument))
+            result(try BackgroundDownloads.start(url, inApp: true, replacingID: argument))
           default:
             result(try BackgroundDownloads.cancel(argument))
           }

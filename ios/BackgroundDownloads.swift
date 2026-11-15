@@ -27,10 +27,13 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
     return URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
   }
 
-  static func start(_ url: URL, inApp: Bool = false, retryID: String? = nil) throws -> Bool {
+  static func start(
+    _ url: URL, inApp: Bool = false, source: URL? = nil, replacingID: String? = nil
+  ) throws -> Bool {
     guard SharedLinks.isDirectVideo(url) else { throw URLError(.unsupportedURL) }
     return try SharedLinks.withQueueLock {
-      let key = SharedLinks.downloadKey(url)
+      let original = source ?? url
+      let key = SharedLinks.downloadKey(original)
       let entries = try SharedLinks.entries()
       if entries.contains(where: { entry in
         guard entry.state == .downloading || entry.state == .saved,
@@ -39,15 +42,24 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
         return SharedLinks.downloadKey(existing) == key
       }) { return false }
 
-      if let retryID {
-        let previous = try SharedLinks.entry(retryID)
-        guard previous.state == .failed || previous.state == .cancelled else { return false }
+      var replacedFile: URL?
+      if let replacingID {
+        guard let previous = entries.first(where: { $0.id == replacingID }),
+              previous.state == .failed || previous.state == .cancelled ||
+                (source != nil && previous.state == .pending)
+        else { return false }
+        let record = try SharedLinks.file(replacingID, suffix: "json")
+        if FileManager.default.fileExists(atPath: record.path) {
+          replacedFile = record
+        } else {
+          replacedFile = try SharedLinks.file(replacingID, suffix: "url")
+        }
       }
 
-      let entry = try SharedLinks.enqueue(url, state: .downloading)
-      if let retryID {
+      let entry = try SharedLinks.enqueue(original, state: .downloading)
+      if let replacedFile {
         do {
-          try FileManager.default.removeItem(at: SharedLinks.file(retryID, suffix: "json"))
+          try FileManager.default.removeItem(at: replacedFile)
         } catch {
           try? FileManager.default.removeItem(at: SharedLinks.file(entry.id, suffix: "json"))
           throw error

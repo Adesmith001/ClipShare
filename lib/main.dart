@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'social_video.dart';
+
 const plum = Color(0xFF302435);
 const apricot = Color(0xFFF5C5A5);
 const ivory = Color(0xFFFAF7F2);
@@ -111,12 +113,14 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     if (_adding) return;
     final text = _link.text.trim();
     final url = Uri.tryParse(text);
-    if (url == null ||
-        url.scheme.toLowerCase() != 'https' ||
-        url.host.isEmpty ||
-        url.userInfo.isNotEmpty ||
-        !url.path.toLowerCase().endsWith('.mp4')) {
-      _showMessage('Enter a direct HTTPS MP4 link.');
+    if (isSocialVideo(url)) {
+      await _downloadPost(url!);
+      return;
+    }
+    if (!isDirectVideo(url)) {
+      _showMessage(
+        'Use a Pinterest Pin, an X post, or a direct HTTPS MP4 link.',
+      );
       return;
     }
     setState(() => _adding = true);
@@ -129,6 +133,37 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       await _refreshSharedLinks();
     } on PlatformException {
       if (mounted) _showMessage('Couldn’t start the download.');
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  Future<void> _downloadPost(Uri url, {String? replacing}) async {
+    if (_adding) return;
+    setState(() => _adding = true);
+    try {
+      final resolved = await resolveSocialVideo(url);
+      if (!mounted) return;
+      final added = await _channel.invokeMethod<bool>('addResolved', {
+        'source': resolved.source.toString(),
+        'media': resolved.media.toString(),
+        'replacing': ?replacing,
+      });
+      if (!mounted) return;
+      if (replacing == null) {
+        _link.clear();
+        FocusScope.of(context).unfocus();
+      }
+      if (added == false) _showMessage('This video is already in Downloads.');
+      await _refreshSharedLinks();
+    } on FormatException {
+      if (mounted) _showMessage('This post has no accessible MP4 video.');
+    } on PlatformException {
+      if (mounted) _showMessage('Couldn’t start the download.');
+    } on Exception {
+      if (mounted) {
+        _showMessage('Couldn’t reach the video provider. Try again.');
+      }
     } finally {
       if (mounted) setState(() => _adding = false);
     }
@@ -219,7 +254,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                   controller: _link,
                                   decoration: const InputDecoration(
                                     labelText: 'Video link',
-                                    hintText: 'Paste an HTTPS MP4 link',
+                                    hintText: 'Pinterest, X, or MP4 link',
                                     border: OutlineInputBorder(),
                                   ),
                                   keyboardType: TextInputType.url,
@@ -322,8 +357,29 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                               when link['canRetry'] == true =>
                             IconButton(
                               tooltip: 'Retry download',
-                              onPressed: () => _queueAction('retry', id),
+                              onPressed: () {
+                                final url = Uri.tryParse(link['url'] as String);
+                                if (isSocialVideo(url)) {
+                                  _downloadPost(url!, replacing: id);
+                                } else {
+                                  _queueAction('retry', id);
+                                }
+                              },
                               icon: const Icon(Icons.refresh_rounded),
+                            ),
+                          'pending'
+                              when isSocialVideo(
+                                Uri.tryParse(link['url'] as String),
+                              ) =>
+                            IconButton(
+                              tooltip: 'Download video',
+                              onPressed: _adding
+                                  ? null
+                                  : () => _downloadPost(
+                                      Uri.parse(link['url'] as String),
+                                      replacing: id,
+                                    ),
+                              icon: const Icon(Icons.download_rounded),
                             ),
                           _ => null,
                         },

@@ -11,7 +11,7 @@ flutter pub get
 flutter run
 ```
 
-The app opens to Downloads. On iOS, ClipShare can queue a shared web link or start downloading a direct HTTPS MP4 from the Share Extension. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
+The app opens to Downloads. Paste a public Pinterest video Pin, a `pin.it` share link, an X video post, or a direct HTTPS MP4 to start a download. ClipShare resolves public posts on-device and selects the highest-resolution Pinterest MP4 or the highest-bitrate MP4 for the first video in an X post. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
 
 ## Try Android sharing
 
@@ -21,7 +21,7 @@ For a failure check, share an MP4 URL that returns an error page. ClipShare shou
 
 ## Manage downloads
 
-Paste a direct HTTPS MP4 URL into **Video link** and tap **Add link**. An active or saved download for the same URL stays in the queue once. ClipShare shows percentages when the transfer reports a total size. Use **Retry download** for failed or cancelled entries. Android can cancel active transfers. On iOS, Cancel appears for transfers started in the current ClipShare session. Transfers started in the Share Extension continue under iOS background scheduling.
+Paste a supported video URL into **Video link** and tap **Add link**. An active or saved download for the same URL stays in the queue once. ClipShare shows percentages when the transfer reports a total size. Use **Retry download** for failed or cancelled entries. Android can cancel active transfers. On iOS, Cancel appears for transfers started in the current ClipShare session. Transfers started in the Share Extension continue under iOS background scheduling.
 
 Use **Save to Gallery** on Android 10 or later. On iOS, open **Export video** and choose **Save to Photos** or **Save to Files**. ClipShare keeps its local copy if you dismiss the export picker or decline Photos access.
 
@@ -36,6 +36,8 @@ The **iOS build** workflow compiles Runner and checks that the Share Extension i
 5. Try `xtool install <path-to-ipa>` from WSL with the iPhone paired over USB. If re-signing changes the App Group, use `ideviceinstaller install <path-to-ipa>` to install the CI-signed IPA directly.
 
 To verify the handoff, open a page in Safari, share it to ClipShare, and tap **Add to ClipShare**. Safari should stay foregrounded. Open ClipShare and check that the link appears once as **Pending download**, then close and reopen the app to check that the entry persists.
+
+For a Pinterest video Pin or an X video post, share it to ClipShare the same way, then tap **Download video** on its pending entry in ClipShare. Instagram, TikTok, and YouTube post links still need provider support.
 
 To verify a download, open and share a direct HTTPS URL whose path ends in `.mp4`. Use a video you have permission to download and that has audio. Tap **Download** and stay in Safari until the transfer has had time to finish. Open ClipShare, check that the entry says **Saved**, and tap **Play video**. Verify that the video plays with audio and remains available after relaunch. An MP4 URL returning an error page should instead show **Download failed**.
 
