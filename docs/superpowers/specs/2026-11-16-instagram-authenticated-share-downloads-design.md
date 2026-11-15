@@ -1,6 +1,6 @@
 # Instagram Sign-In and Share-Sheet Downloads
 
-**Status:** Approved for implementation  
+**Status:** Approved for implementation
 **Date:** 2026-11-16
 
 ## Goal
