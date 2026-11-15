@@ -13,6 +13,12 @@ flutter run
 
 The app opens to Downloads. On iOS, ClipShare can queue a shared web link or start downloading a direct HTTPS MP4 from the Share Extension. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
 
+## Try Android sharing
+
+Open a direct HTTPS link whose path ends in `.mp4` in a browser or messaging app. Share the link to **ClipShare** and tap **Download**. The confirmation closes and Android continues the transfer while you stay in the source app. Open ClipShare and tap **Play video** when the entry says **Saved**. Use a video with audio and verify that it still plays after relaunch.
+
+For a failure check, share an MP4 URL that returns an error page. ClipShare should show **Download failed**. Sharing a post page shows the prompt to use a direct MP4 link.
+
 ## Build and install on iPhone
 
 The **iOS build** workflow compiles Runner and checks that the Share Extension is embedded. For an installable IPA, use a private GitHub repository and create an Actions environment named `ios-signing`.

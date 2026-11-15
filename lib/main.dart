@@ -45,14 +45,16 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   List<Map<Object?, Object?>> _sharedLinks = const [];
   bool _inboxUnavailable = false;
 
-  bool get _hasShareExtension =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  bool get _hasNativeDownloads =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.android);
 
   @override
   void initState() {
     super.initState();
     _lifecycle = AppLifecycleListener(onResume: _refreshSharedLinks);
-    if (_hasShareExtension) {
+    if (_hasNativeDownloads) {
       _channel.setMethodCallHandler((call) async {
         if (call.method == 'changed') await _refreshSharedLinks();
       });
@@ -63,12 +65,12 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   @override
   void dispose() {
     _lifecycle.dispose();
-    if (_hasShareExtension) _channel.setMethodCallHandler(null);
+    if (_hasNativeDownloads) _channel.setMethodCallHandler(null);
     super.dispose();
   }
 
   Future<void> _refreshSharedLinks() async {
-    if (!_hasShareExtension) return;
+    if (!_hasNativeDownloads) return;
     try {
       final links = await _channel.invokeListMethod<Map<Object?, Object?>>(
         'list',
