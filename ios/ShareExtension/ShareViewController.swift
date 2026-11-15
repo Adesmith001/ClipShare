@@ -3,12 +3,13 @@ import UniformTypeIdentifiers
 import WebKit
 
 final class ShareViewController: UIViewController, WKNavigationDelegate {
-  private enum InstagramState {
+  private enum InstagramState: Equatable {
     case idle
     case checking
     case signingIn
     case retrySharedLink
     case connected
+    case failed
   }
 
   private let message = UILabel()
@@ -21,6 +22,7 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
   private var webViewHeight: NSLayoutConstraint!
   private var sharedURL: URL?
   private var instagramState = InstagramState.idle
+  private var webLoadTimeout: DispatchWorkItem?
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -117,6 +119,8 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
         showInstagramPage(sharedURL)
       case .connected:
         disconnectInstagram()
+      case .failed:
+        showInstagramPage(sharedURL)
       case .checking, .signingIn:
         break
       }
@@ -140,13 +144,68 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
 
   private func showInstagramPage(_ url: URL) {
     instagramState = .checking
+    webLoadTimeout?.cancel()
     saveButton.isEnabled = false
     saveButton.setTitle("Checking Instagram…", for: .normal)
-    message.text = "Opening the shared post in Instagram's secure sign-in view…"
+    message.text = "Opening the shared post in Instagram…"
     webView.isHidden = false
     webViewHeight.constant = 380
     UIView.animate(withDuration: 0.2) { self.view.layoutIfNeeded() }
+    NSLog("ClipShare InstagramShare starting page load")
     webView.load(URLRequest(url: url))
+    let timeout = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      guard self.instagramState == .checking else { return }
+      NSLog("ClipShare InstagramShare page load timed out")
+      self.webView.stopLoading()
+      self.instagramState = .failed
+      self.message.text = "Instagram did not finish loading. Check your connection and retry."
+      self.saveButton.setTitle("Retry Instagram", for: .normal)
+      self.saveButton.isEnabled = true
+    }
+    webLoadTimeout = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(20), execute: timeout)
+  }
+
+  func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+    let host = webView.url?.host?.lowercased() ?? "unknown"
+    NSLog("ClipShare InstagramShare navigation started host=%@", host)
+  }
+
+  func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+    let host = webView.url?.host?.lowercased() ?? "unknown"
+    NSLog("ClipShare InstagramShare navigation committed host=%@", host)
+  }
+
+  func webView(
+    _ webView: WKWebView,
+    didFailProvisionalNavigation navigation: WKNavigation!,
+    withError error: Error
+  ) {
+    reportInstagramLoadFailure(error)
+  }
+
+  func webView(
+    _ webView: WKWebView,
+    didFail navigation: WKNavigation!,
+    withError error: Error
+  ) {
+    reportInstagramLoadFailure(error)
+  }
+
+  private func reportInstagramLoadFailure(_ error: Error) {
+    let failure = error as NSError
+    NSLog(
+      "ClipShare InstagramShare navigation failed domain=%@ code=%ld",
+      failure.domain,
+      failure.code
+    )
+    webLoadTimeout?.cancel()
+    guard instagramState == .checking || instagramState == .signingIn else { return }
+    instagramState = .failed
+    message.text = "Instagram could not load. Check your connection and retry."
+    saveButton.setTitle("Retry Instagram", for: .normal)
+    saveButton.isEnabled = true
   }
 
   func webView(
@@ -163,9 +222,11 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
     let instagramHost = host == "instagram.com" || host.hasSuffix(".instagram.com")
     let facebookHost = host == "facebook.com" || host.hasSuffix(".facebook.com")
     guard url.scheme?.lowercased() == "https", instagramHost || facebookHost else {
+      NSLog("ClipShare InstagramShare blocked navigation scheme=%@ host=%@", url.scheme ?? "unknown", host)
       decisionHandler(.cancel)
       return
     }
+    NSLog("ClipShare InstagramShare allowed navigation scheme=%@ host=%@", url.scheme ?? "unknown", host)
     if instagramHost && Self.isInstagramLogin(url) {
       instagramState = .signingIn
       message.text = "Sign in to Instagram here. ClipShare does not see your password."
@@ -177,6 +238,8 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
     guard let url = webView.url else { return }
+    webLoadTimeout?.cancel()
+    NSLog("ClipShare InstagramShare navigation finished host=%@", url.host?.lowercased() ?? "unknown")
     if Self.isInstagramLogin(url) || Self.isInstagramChallenge(url) {
       instagramState = .signingIn
       message.text = "Sign in to Instagram here. ClipShare does not see your password."
@@ -195,9 +258,24 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
       message.text = "Instagram is connected in ClipShare's share extension."
       saveButton.setTitle("Disconnect Instagram", for: .normal)
       saveButton.isEnabled = true
-    case .idle, .retrySharedLink, .connected:
+    case .idle, .retrySharedLink, .connected, .failed:
       break
     }
+  }
+
+  func webView(
+    _ webView: WKWebView,
+    decidePolicyFor navigationResponse: WKNavigationResponse,
+    decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+  ) {
+    if let response = navigationResponse.response as? HTTPURLResponse {
+      NSLog(
+        "ClipShare InstagramShare response status=%ld host=%@",
+        response.statusCode,
+        response.url?.host?.lowercased() ?? "unknown"
+      )
+    }
+    decisionHandler(.allow)
   }
 
   private func disconnectInstagram() {
