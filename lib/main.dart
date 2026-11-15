@@ -118,7 +118,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       return;
     }
     if (!isDirectVideo(url)) {
-      _showMessage('Use a Pinterest, X, YouTube, or direct HTTPS MP4 link.');
+      _showMessage(
+        'Use a Pinterest, X, Instagram, YouTube, or direct HTTPS MP4 link.',
+      );
       return;
     }
     setState(() => _adding = true);

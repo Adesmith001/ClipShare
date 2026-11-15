@@ -2,6 +2,24 @@ import 'package:clipshare/social_video.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('finds the requested Instagram video inside public page data', () {
+    final url = Uri.parse('https://www.instagram.com/reel/abc123/');
+    expect(isSocialVideo(url), isTrue);
+    const html = '''
+      <script type="application/json">
+        {"data": {"xig_polaris_media": {"if_not_gated_logged_out": {
+          "code": "abc123",
+          "video_versions": [
+            {"url": "https://media.example/high.mp4", "width": 9999, "height": 9999},
+            {"url": "https://video.cdninstagram.com/clip.mp4"}
+          ]
+        }}}}
+      </script>
+    ''';
+    expect(instagramMp4(html, 'abc123')?.host, 'video.cdninstagram.com');
+    expect(instagramMp4(html, 'unrelated'), isNull);
+  });
+
   test('recognizes YouTube video links without accepting playlists', () {
     for (final url in [
       'https://www.youtube.com/watch?v=Dpp1sIL1m5Q',
