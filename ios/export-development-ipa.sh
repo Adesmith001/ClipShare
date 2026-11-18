@@ -13,6 +13,7 @@ trap 'security delete-keychain "$keychain" >/dev/null 2>&1 || true' EXIT
 password=$(openssl rand -hex 32)
 printf '%s' "$IOS_CERTIFICATE" | base64 -D > "$work_dir/certificate.p12"
 security create-keychain -p "$password" "$keychain"
+security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$password" "$keychain"
 security import "$work_dir/certificate.p12" -k "$keychain" -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
 security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
