@@ -1,6 +1,6 @@
 # ClipShare
 
-ClipShare is a personal downloader for media shared from social apps.
+ClipShare is a personal downloader for media shared from social apps. Version `0.2.0+9` adds local folders, search, selection and batch actions, queue recovery, and beta diagnostics.
 
 ## Run the app
 
@@ -17,7 +17,7 @@ The app opens to Downloads. Paste a public Pinterest video Pin, a `pin.it` share
 
 Open a direct HTTPS link whose path ends in `.mp4` in a browser or messaging app. Share the link to **ClipShare** and tap **Download**. The confirmation closes and Android continues the transfer while you stay in the source app. Open ClipShare and tap **Play video** when the entry says **Saved**. Use a video with audio and verify that it still plays after relaunch.
 
-For a failure check, share an MP4 URL that returns an error page. ClipShare should show **Download failed**. Sharing a post page shows the prompt to use a direct MP4 link.
+For a failure check, share an MP4 URL that returns an error page. ClipShare should show **Download failed**. Sharing a supported social post adds one pending entry. Open ClipShare and use its download action to resolve the post. Unsupported links show an explanation instead of adding a pending entry.
 
 ## Manage downloads
 
@@ -25,30 +25,50 @@ Paste a supported URL into **Media link** and tap **Add link**. The library show
 
 Use **Save to Gallery** on Android 10 or later. On iOS, open the item's export menu and choose **Save to Photos** or **Save to Files**. ClipShare keeps its local copy if you dismiss the export picker or decline Photos access.
 
+## Folders, search, and batch actions
+
+Use **Manage folders → New folder** to create a flat local collection. Select a folder to rename it or remove it. Removing a folder moves its items to **Unfiled**; it does not delete media. New links start in Unfiled. Pending items and retries keep their chosen folder across slides, including Unfiled. Already-saved duplicates retain their existing folder; use Move to folder to relocate them. Use an item's menu to **Move to folder** or **Delete download**. Deletion removes the app-local media and entry; copies already exported to Photos, Gallery, or Files remain.
+
+Search matches titles, sources, and URL paths, and combines with the folder and Photos/Videos filters. URL tokens are not searched. Tap **Select downloads**, or long-press an item, to select entries. **Select all visible** respects the current filters. Selected entries remain selected when filters change; check the selected count. Use **Actions** to move, delete, retry/download, cancel, or save eligible media to Photos/Gallery. Batch results report completed, failed, and skipped entries. Deletion requires confirmation.
+
+**Help and feedback** shows the version/build, local media storage, provider instructions, and a copyable diagnostic report. Reports exclude full URLs, media titles, folder names, passwords, and website sessions. Add reproduction steps and share the report manually with your beta organiser. Use Refresh or pull down to reload the library.
+
+## Android release signing
+
+Debug builds still work with `flutter run` and `flutter build apk --debug`. Distributed release builds require your own stable signing key. Copy `android/key.properties.example` to the ignored `android/key.properties` and fill in the existing keystore location, store password, alias, and key password. Paths are relative to `android/`, or can be absolute paths with forward slashes.
+
+CI can supply `CLIPSHARE_STORE_FILE`, `CLIPSHARE_STORE_PASSWORD`, `CLIPSHARE_KEY_ALIAS`, and `CLIPSHARE_KEY_PASSWORD` instead. The keystore must exist. Missing release configuration fails with a clear error; release builds never fall back to the debug key. Keystores and local signing properties are ignored by Git.
+
+```sh
+flutter build apk --release
+# Or, for an Android testing track:
+flutter build appbundle --release
+```
+
 ## Build and install on iPhone
 
-The **iOS build** workflow compiles Runner and checks that the Share Extension is embedded. Run the signed build from a private GitHub repository so the IPA and its embedded device profiles are available only to users with repository access.
+The **Beta checks and iOS build** workflow analyzes/formats/tests Flutter, builds Android and native test sources, compiles Runner and its embedded Share Extension, and runs the native iOS regression suite in a simulator. Signed exports depend on those checks. Run the signed build from a private GitHub repository so the IPA and its embedded device profiles are available only to users with repository access.
 
 1. Register the iPhone with your Apple development team. Enable `group.com.adesmith001.clipshare` on the explicit App IDs `com.adesmith001.clipshare` and `com.adesmith001.clipshare.ShareExtension`.
 2. Create an Apple Development signing certificate and a development provisioning profile for each App ID. Include the iPhone and the App Group in both profiles.
 3. Under **Settings → Secrets and variables → Actions** in the private repository, set the repository variable `APPLE_TEAM_ID`. Add the repository secrets `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_RUNNER_PROFILE_BASE64`, and `IOS_EXTENSION_PROFILE_BASE64`. Use base64 for the exported certificate with its private key (`.p12`) and the two `.mobileprovision` files.
-4. In **Actions → iOS build → Run workflow**, turn on **Export a signed development IPA**. Download the `ClipShare-development-ipa` artifact and enable Developer Mode on the iPhone if prompted.
+4. In **Actions → Beta checks and iOS build → Run workflow**, turn on **Export a signed development IPA**. Download the `ClipShare-development-ipa` artifact and enable Developer Mode on the iPhone if prompted.
 5. Try `xtool install <path-to-ipa>` from WSL with the iPhone paired over USB. If re-signing changes the App Group, use `ideviceinstaller install <path-to-ipa>` to install the CI-signed IPA directly.
 
 To verify the handoff, open a page in Safari, share it to ClipShare, and tap **Add to ClipShare**. Safari should stay foregrounded. Open ClipShare and check that the link appears once as **Pending download**, then close and reopen the app to check that the entry persists.
 
 For Instagram on iPhone, choose **ClipShare** from Instagram's share sheet. On the first use, sign in on Instagram's page shown inside the share sheet; ClipShare keeps the session in the extension's on-device WebKit store and does not collect your password. After that, sharing an Instagram Reel, photo, or carousel to ClipShare resolves and queues its supported media without opening the main app. If Instagram expires or challenges the session, sign in again in the share sheet. Use **Disconnect Instagram** there to clear the saved website session.
 
-Other supported social posts shared to ClipShare appear as pending entries. Open ClipShare and tap **Download video** on a pending social video. TikTok links still need provider support. Pasting an Instagram link into the main app does not use the Share Extension's Instagram session.
+Other supported social posts shared to ClipShare appear as deduplicated pending entries. Open ClipShare and tap **Download media** on a pending post. TikTok links still need provider support. Pasting an Instagram link into the main app does not use the Share Extension's Instagram session.
 
 To verify a download, open and share a direct HTTPS URL whose path ends in `.mp4`. Use a video you have permission to download and that has audio. Tap **Download** and stay in Safari until the transfer has had time to finish. Open ClipShare, check that the entry says **Saved**, and tap **Play video**. Verify that the video plays with audio and remains available after relaunch. An MP4 URL returning an error page should instead show **Download failed**.
 
-## Milestones
+## Beta verification
 
-1. Initialize the Flutter app for iOS and Android.
-2. Build a signed iPhone IPA on macOS CI and verify the native Share Extension and App Group on-device.
-3. Prove a direct iOS download, then add Android sharing and downloads.
-4. Add paste, queue controls, recovery, and media export.
-5. Verify Pinterest, X, Instagram, and TikTok individually before packaging the personal builds.
+See [the beta testing checklist](docs/beta-testing.md) for device scenarios, installation/signing requirements, and native test commands. Automated parser and mocked-widget checks do not prove that a live provider or the signed share extension works on a device. In particular, Instagram embedded sign-in, session reuse, background transfers, and app upgrades need signed-iPhone verification before a wider beta.
 
-Commit and push each verified milestone to GitHub.
+```sh
+flutter analyze --no-pub
+flutter test --no-pub
+flutter build apk --debug --no-pub
+```

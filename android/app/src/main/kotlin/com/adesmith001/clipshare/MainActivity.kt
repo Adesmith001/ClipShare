@@ -40,6 +40,43 @@ class MainActivity : FlutterActivity() {
                             result.error("shared_links_unavailable", null, null)
                         }
                     }
+                    "folders", "info", "reconcile" -> {
+                        try {
+                            result.success(when (call.method) {
+                                "folders" -> downloads.folders()
+                                "info" -> downloads.info()
+                                else -> downloads.reconcile()
+                            })
+                        } catch (error: Exception) {
+                            result.error("shared_links_unavailable", null, null)
+                        }
+                    }
+                    "createFolder", "deleteFolder", "renameFolder", "move" -> {
+                        try {
+                            val completed = when (call.method) {
+                                "createFolder" -> downloads.createFolder(call.arguments as? String
+                                    ?: throw IllegalArgumentException())
+                                "deleteFolder" -> downloads.deleteFolder(call.arguments as? String
+                                    ?: throw IllegalArgumentException())
+                                "renameFolder" -> downloads.renameFolder(
+                                    call.argument<String>("from") ?: throw IllegalArgumentException(),
+                                    call.argument<String>("to") ?: throw IllegalArgumentException()
+                                )
+                                else -> {
+                                    val ids = call.argument<List<Any>>("ids")?.map {
+                                        (it as? String)?.toLongOrNull() ?: throw IllegalArgumentException()
+                                    } ?: throw IllegalArgumentException()
+                                    downloads.move(ids, call.argument<String>("folder")
+                                        ?: throw IllegalArgumentException())
+                                }
+                            }
+                            result.success(completed)
+                        } catch (error: IllegalArgumentException) {
+                            result.error("invalid_argument", null, null)
+                        } catch (error: Exception) {
+                            result.error("download_action_failed", null, null)
+                        }
+                    }
                     "play" -> {
                         val id = (call.arguments as? String)?.toLongOrNull()
                         val uri = id?.let(downloads::videoUri)
@@ -55,15 +92,18 @@ class MainActivity : FlutterActivity() {
                     "addResolved" -> {
                         val media = call.argument<String>("media")?.let(Uri::parse)
                         val source = call.argument<String>("source")?.let(Uri::parse)
-                        val replacing = call.argument<String>("replacing")?.toLongOrNull()
-                        if (media == null || source == null) {
+                        val replacingValue = call.argument<String>("replacing")
+                        val replacing = replacingValue?.toLongOrNull()
+                        if (media == null || source == null || (replacingValue != null && replacing == null)) {
                             result.error("invalid_argument", null, null)
                         } else {
                             try {
                                 result.success(downloads.enqueueResolved(
                                     media, source, replacing, call.argument<String>("title"),
                                     call.argument<String>("slot")?.toIntOrNull() ?: 0,
-                                    call.argument<String>("position")
+                                    call.argument<String>("position"),
+                                    call.argument<String>("sharedSource")?.let(Uri::parse),
+                                    call.argument<String>("folder")
                                 ))
                             } catch (error: Exception) {
                                 result.error("download_action_failed", null, null)
@@ -75,7 +115,7 @@ class MainActivity : FlutterActivity() {
                         val size = if (call.method == "preview") 1600 else 400
                         result.success(id?.let { downloads.thumbnail(it, size) })
                     }
-                    "add", "cancel", "retry", "export" -> {
+                    "add", "cancel", "retry", "export", "delete" -> {
                         val argument = call.arguments as? String
                         if (argument == null) {
                             result.error("invalid_argument", null, null)
@@ -89,6 +129,7 @@ class MainActivity : FlutterActivity() {
                                 val completed = when (call.method) {
                                     "cancel" -> downloads.cancel(id)
                                     "retry" -> downloads.retry(id)
+                                    "delete" -> downloads.delete(id)
                                     else -> downloads.export(id)
                                 }
                                 result.success(completed)

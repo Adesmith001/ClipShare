@@ -2,6 +2,22 @@ import 'package:clipshare/social_video.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'extracts a supported URL from shared text and ignores unsupported links',
+    () {
+      expect(
+        extractMediaLink('A clip https://x.com/name/status/123).')?.toString(),
+        'https://x.com/name/status/123',
+      );
+      expect(extractMediaLink('https://example.com/read-more'), isNull);
+      expect(
+        extractMediaLink(
+          'https://example.com/read-more https://example.com/photo.jpg',
+        )?.path,
+        '/photo.jpg',
+      );
+    },
+  );
   test('resolves each Instagram carousel slide in post order', () {
     const html = '''
       <script type="application/json">

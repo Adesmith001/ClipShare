@@ -16,6 +16,23 @@ bool isDirectImage(Uri? url) =>
     isHttpsLink(url) &&
     RegExp(r'\.(?:jpe?g|png|webp)$').hasMatch(url!.path.toLowerCase());
 
+Uri? extractMediaLink(String text) {
+  final whole = Uri.tryParse(text.trim());
+  bool supported(Uri? url) =>
+      isSocialVideo(url) || isDirectVideo(url) || isDirectImage(url);
+  if (!RegExp(r'\s').hasMatch(text.trim()) && supported(whole)) return whole;
+  for (final match in RegExp(
+    r'''https://[^\s<>"']+''',
+    caseSensitive: false,
+  ).allMatches(text)) {
+    final url = Uri.tryParse(
+      match.group(0)!.replaceFirst(RegExp(r'[.,!?)\]}]+$'), ''),
+    );
+    if (supported(url)) return url;
+  }
+  return null;
+}
+
 typedef MediaItem = ({Uri url, int slot, String? position});
 typedef ResolvedMedia = ({Uri source, List<MediaItem> items, String? title});
 
@@ -84,6 +101,23 @@ bool isSocialVideo(Uri? url) =>
         _xPostId(url) != null ||
         _youtubeId(url) != null ||
         _instagramCode(url) != null);
+
+// Match pending/retry metadata before the native queue learns a short-link alias.
+String mediaSourceKey(Uri? url) {
+  if (url == null) return '';
+  final youtube = _youtubeId(url);
+  if (youtube != null) return 'youtube:$youtube';
+  final post = _xPostId(url);
+  if (post != null) return 'x:$post';
+  final pin = _pinId(url);
+  if (pin != null) return 'pinterest:$pin';
+  final instagram = _instagramCode(url);
+  if (instagram != null) return 'instagram:$instagram';
+  if (url.host == 'pin.it' && url.pathSegments.length == 1) {
+    return 'pin.it:${url.pathSegments.single}';
+  }
+  return url.removeFragment().toString();
+}
 
 const _timeout = Duration(seconds: 12);
 

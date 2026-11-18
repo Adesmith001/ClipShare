@@ -1,7 +1,7 @@
 name: clipshare
 description: "A personal downloader for media shared from social apps."
 publish_to: 'none'
-version: 0.1.6+8
+version: 0.2.0+9
 
 environment:
   sdk: ^3.14.0

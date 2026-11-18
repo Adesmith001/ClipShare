@@ -1,7 +1,30 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Local properties take precedence; CI may provide the same values through env.
+val releaseKeys = Properties().apply {
+    val propertiesFile = rootProject.file("key.properties")
+    if (propertiesFile.isFile) propertiesFile.inputStream().use { load(it) }
+}
+fun releaseKey(property: String, environment: String): String? =
+    (releaseKeys.getProperty(property) ?: System.getenv(environment))?.takeIf { it.isNotBlank() }
+val releaseStore = releaseKey("storeFile", "CLIPSHARE_STORE_FILE")?.let(rootProject::file)
+val releaseStorePassword = releaseKey("storePassword", "CLIPSHARE_STORE_PASSWORD")
+val releaseAlias = releaseKey("keyAlias", "CLIPSHARE_KEY_ALIAS")
+val releaseKeyPassword = releaseKey("keyPassword", "CLIPSHARE_KEY_PASSWORD")
+val releaseSigningReady = releaseStore?.isFile == true && releaseStorePassword != null &&
+    releaseAlias != null && releaseKeyPassword != null
+
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.project == project && it.name.contains("release", ignoreCase = true) } &&
+        !releaseSigningReady) {
+        throw GradleException("Release signing is missing. Configure android/key.properties (see key.properties.example) or CLIPSHARE_STORE_FILE, CLIPSHARE_STORE_PASSWORD, CLIPSHARE_KEY_ALIAS and CLIPSHARE_KEY_PASSWORD. A release keystore file must exist.")
+    }
 }
 
 android {
@@ -27,13 +50,23 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "android.test.InstrumentationTestRunner"
+    }
+
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = releaseStore
+                storePassword = releaseStorePassword
+                keyAlias = releaseAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 }
@@ -46,4 +79,10 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// The platform test runner lives in an optional SDK library on current Android.
+// Compile-only keeps these platform classes out of both APKs.
+dependencies {
+    androidTestCompileOnly(files("${android.sdkDirectory}/platforms/android-${android.compileSdk}/optional/android.test.base.jar"))
 }

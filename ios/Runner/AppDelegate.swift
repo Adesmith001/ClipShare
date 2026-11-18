@@ -21,8 +21,44 @@ import UniformTypeIdentifiers
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
     BackgroundDownloads.didChange = { channel.invokeMethod("changed", arguments: nil) }
+    BackgroundDownloads.reconcile(protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable) { _ in }
+    _ = NotificationCenter.default.addObserver(
+      forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main
+    ) { _ in
+      BackgroundDownloads.reconcile(protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable) { _ in }
+    }
     channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
+      case "reconcile":
+        BackgroundDownloads.reconcile(protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable) { result($0) }
+      case "folders", "createFolder", "deleteFolder", "renameFolder", "move", "delete", "info":
+        do {
+          switch call.method {
+          case "folders": result(try SharedLinks.folders())
+          case "createFolder", "deleteFolder", "delete":
+            guard let value = call.arguments as? String else { throw URLError(.badURL) }
+            if call.method == "createFolder" { result(try SharedLinks.createFolder(value)) }
+            else if call.method == "deleteFolder" { result(try SharedLinks.renameFolder(value, to: nil)) }
+            else { result(try BackgroundDownloads.delete(value)) }
+          case "renameFolder":
+            guard let args = call.arguments as? [String: String], let from = args["from"], let to = args["to"] else { throw URLError(.badURL) }
+            result(try SharedLinks.renameFolder(from, to: to))
+          case "move":
+            guard let args = call.arguments as? [String: Any], let ids = args["ids"] as? [String], let folder = args["folder"] as? String else { throw URLError(.badURL) }
+            result(try SharedLinks.move(ids, folder: folder))
+          default:
+            _ = try SharedLinks.entries()
+            result([
+              "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+              "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+              "os": "iOS \(UIDevice.current.systemVersion)",
+              "storageBytes": try SharedLinks.storageBytes(),
+              "recoveredEntries": try SharedLinks.recoveredEntries(),
+            ])
+          }
+        } catch {
+          result(FlutterError(code: "library_action_failed", message: nil, details: nil))
+        }
       case "list":
         do {
           result(try SharedLinks.entries().map(\.channelValue))
@@ -68,7 +104,7 @@ import UniformTypeIdentifiers
       case "addResolved":
         guard let arguments = call.arguments as? [String: String],
               let source = arguments["source"].flatMap({ URL(string: $0) }),
-              SharedLinks.webURL(source) != nil,
+              SharedLinks.canonicalSource(source) != nil,
               let media = arguments["media"].flatMap({ URL(string: $0) })
         else {
           result(FlutterError(code: "invalid_argument", message: nil, details: nil))
@@ -78,10 +114,12 @@ import UniformTypeIdentifiers
           result(try BackgroundDownloads.start(
             media, inApp: true, source: source, replacingID: arguments["replacing"],
             title: arguments["title"], slot: arguments["slot"].flatMap { Int($0) } ?? 0,
-            position: arguments["position"]
+            position: arguments["position"],
+            sourceAlias: arguments["sharedSource"].flatMap { URL(string: $0) },
+            folder: arguments["folder"]
           ))
         } catch {
-          result(FlutterError(code: "download_action_failed", message: nil, details: nil))
+          result(FlutterError(code: BackgroundDownloads.failureCode(error), message: nil, details: nil))
         }
       case "add", "retry", "cancel":
         guard let argument = call.arguments as? String else {
@@ -101,14 +139,14 @@ import UniformTypeIdentifiers
             result(try BackgroundDownloads.cancel(argument))
           }
         } catch {
-          result(FlutterError(code: "download_action_failed", message: nil, details: nil))
+          result(FlutterError(code: BackgroundDownloads.failureCode(error), message: nil, details: nil))
         }
-      case "saveToPhotos", "exportToFiles":
+      case "saveToPhotos", "exportToFiles", "export":
         guard let id = call.arguments as? String, let file = self?.savedFile(id) else {
           result(FlutterError(code: "video_unavailable", message: nil, details: nil))
           return
         }
-        if call.method == "saveToPhotos" {
+        if call.method == "saveToPhotos" || call.method == "export" {
           self?.saveToPhotos(file, result: result)
         } else if let presenter = self?.presenter() {
           presenter.present(UIDocumentPickerViewController(forExporting: [file], asCopy: true), animated: true)

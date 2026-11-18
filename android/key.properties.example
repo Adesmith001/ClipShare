@@ -1,0 +1,11 @@
+# Copy to key.properties (ignored by Git). Paths are relative to android/.
+# Use forward slashes for absolute Windows paths, e.g. C:/keys/clipshare.jks.
+storeFile=../private/clipshare-release.jks
+storePassword=REPLACE_WITH_STORE_PASSWORD
+keyAlias=clipshare
+keyPassword=REPLACE_WITH_KEY_PASSWORD
+
+# CI alternative (no key.properties required):
+# CLIPSHARE_STORE_FILE, CLIPSHARE_STORE_PASSWORD,
+# CLIPSHARE_KEY_ALIAS, CLIPSHARE_KEY_PASSWORD
+# Supply your existing keystore securely. Never commit it or passwords.

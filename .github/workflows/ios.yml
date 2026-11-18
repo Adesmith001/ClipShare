@@ -1,4 +1,4 @@
-name: iOS build
+name: Beta checks and iOS build
 
 on:
   push:
@@ -6,6 +6,16 @@ on:
     paths:
       - 'ios/**'
       - 'lib/**'
+      - 'android/**'
+      - 'test/**'
+      - 'pubspec.*'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'ios/**'
+      - 'android/**'
+      - 'lib/**'
+      - 'test/**'
       - 'pubspec.*'
       - '.github/workflows/ios.yml'
   workflow_dispatch:
@@ -19,8 +29,29 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Flutter and Java
+        run: |
+          git clone --depth 1 --branch 3.50.0 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Analyze, test, and build Android
+        run: |
+          flutter pub get --enforce-lockfile
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze --no-pub
+          flutter test --no-pub
+          flutter build apk --debug --no-pub
+          cd android
+          ./gradlew :app:compileDebugAndroidTestKotlin
+
   build:
-    if: (github.event_name == 'push' && !github.event.repository.private) || (github.event_name == 'workflow_dispatch' && !inputs.signed)
+    needs: verify
     runs-on: macos-26
     timeout-minutes: 25
     steps:
@@ -39,8 +70,18 @@ jobs:
           test -n "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$extension/Info.plist")"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$extension/Info.plist")" = com.apple.share-services
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension/Info.plist")" = com.adesmith001.clipshare.ShareExtension
+      - name: Run native iOS regression tests
+        run: |
+          flutter build ios --simulator --debug --no-pub
+          simulator=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for group in devices.values() for d in group if d["isAvailable"] and d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$simulator" || true
+          xcrun simctl bootstatus "$simulator" -b
+          xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner \
+            -configuration Debug -destination "platform=iOS Simulator,id=$simulator" \
+            CODE_SIGNING_ALLOWED=NO
 
   sign:
+    needs: [verify, build]
     if: github.event_name == 'workflow_dispatch' && inputs.signed && github.ref == 'refs/heads/main'
     runs-on: macos-26
     timeout-minutes: 25

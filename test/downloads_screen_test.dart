@@ -75,7 +75,7 @@ void main() {
 
     await tester.pumpWidget(const ClipShareApp());
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), url);
+    await tester.enterText(find.byKey(const Key('mediaLink')), url);
     await tester.tap(find.text('Add link'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -89,6 +89,8 @@ void main() {
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = platform;
+      await tester.binding.setSurfaceSize(const Size(430, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       const channel = MethodChannel('clipshare/shared_links');
       final messenger = tester.binding.defaultBinaryMessenger;
       Object? played;
@@ -134,6 +136,7 @@ void main() {
       expect(find.text('Saved'), findsOneWidget);
       final play = find.byTooltip('Play video');
       expect(play, findsOneWidget);
+      await tester.ensureVisible(play);
       await tester.tap(play);
       await tester.pumpAndSettle();
       expect(played, 'saved-id');

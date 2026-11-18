@@ -14,19 +14,23 @@ class ShareActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val url = sharedVideo(intent)
+        val url = sharedLink(intent)
         val dialog = AlertDialog.Builder(this)
             .setTitle("ClipShare")
             .setNegativeButton("Cancel", null)
             .setOnDismissListener { finish() }
 
         if (url == null) {
-            dialog.setMessage("Share a direct HTTPS MP4, JPEG, PNG, or WebP link.")
+            dialog.setMessage("Share an X, Pinterest, Instagram, YouTube, or direct HTTPS media link.")
         } else {
-            dialog.setMessage("Download from ${url.host}?")
-                .setPositiveButton("Download") { _, _ ->
+            val pending = AndroidDownloads.socialLink(url)
+            dialog.setMessage(if (pending) "Add this post from ${url.host} to Downloads? Open ClipShare to start it."
+                else "Download from ${url.host}?")
+                .setPositiveButton(if (pending) "Add" else "Download") { _, _ ->
                     val message = try {
-                        if (AndroidDownloads(this).enqueue(url)) "Download started"
+                        if (AndroidDownloads(this).enqueue(url)) {
+                            if (pending) "Added to Downloads. Open ClipShare to start." else "Download started"
+                        }
                         else "This item is already in Downloads"
                     } catch (error: Exception) {
                         "Couldn’t start the download"
@@ -43,13 +47,13 @@ class ShareActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun sharedVideo(intent: Intent): Uri? {
+    private fun sharedLink(intent: Intent): Uri? {
         if (intent.action != Intent.ACTION_SEND || intent.type != "text/plain") return null
         val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT) ?: return null
         val matcher = Patterns.WEB_URL.matcher(text)
         while (matcher.find()) {
             val url = Uri.parse(matcher.group())
-            if (AndroidDownloads.directVideo(url) || AndroidDownloads.imageExtension(url) != null) {
+            if (AndroidDownloads.supportedLink(url)) {
                 return url.normalizeScheme()
             }
         }

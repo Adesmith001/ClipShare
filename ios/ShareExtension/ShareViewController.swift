@@ -8,12 +8,14 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
     case checking
     case signingIn
     case retrySharedLink
-    case connected
+    case resolving
+    case queued
     case failed
   }
 
   private let message = UILabel()
   private let saveButton = UIButton(type: .system)
+  private let disconnectButton = UIButton(type: .system)
   private let webView: WKWebView = {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .default()
@@ -23,6 +25,9 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
   private var sharedURL: URL?
   private var instagramState = InstagramState.idle
   private var webLoadTimeout: DispatchWorkItem?
+  private var resolutionAttempt = 0
+  private var navigationGeneration = 0
+  private var responseStatus = 200
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -50,16 +55,29 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
     webViewHeight = webView.heightAnchor.constraint(equalToConstant: 0)
     webViewHeight.isActive = true
 
-    let stack = UIStackView(arrangedSubviews: [message, webView, saveButton, cancel])
+    disconnectButton.setTitle("Disconnect Instagram", for: .normal)
+    disconnectButton.addTarget(self, action: #selector(disconnectInstagram), for: .touchUpInside)
+    disconnectButton.isHidden = true
+    let scroll = UIScrollView()
+    scroll.keyboardDismissMode = .interactive
+    scroll.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(scroll)
+    let stack = UIStackView(arrangedSubviews: [message, webView, saveButton, disconnectButton, cancel])
     stack.axis = .vertical
     stack.spacing = 16
     stack.translatesAutoresizingMaskIntoConstraints = false
-    view.addSubview(stack)
+    scroll.addSubview(stack)
     let safeArea = view.safeAreaLayoutGuide
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor, constant: 24),
-      stack.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor, constant: -24),
-      stack.centerYAnchor.constraint(equalTo: safeArea.centerYAnchor),
+      scroll.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
+      scroll.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
+      scroll.topAnchor.constraint(equalTo: safeArea.topAnchor),
+      scroll.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+      stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 20),
+      stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -20),
+      stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 20),
+      stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -20),
+      stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -40),
       saveButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
       cancel.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
     ])
@@ -78,15 +96,15 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
           }
         }
         if let url {
-          let normalizedURL = Self.secureInstagramURL(url)
+          guard let normalizedURL = SharedLinks.canonicalSource(url) else { continue }
           sharedURL = normalizedURL
-          message.text = normalizedURL.absoluteString
+          message.text = normalizedURL.host.map { "Ready to add media from \($0)." }
           message.lineBreakMode = .byTruncatingMiddle
           message.numberOfLines = 3
           let direct = SharedLinks.isDirectVideo(normalizedURL) ||
             SharedLinks.imageExtension(normalizedURL) != nil
           saveButton.setTitle(
-            direct ? "Download" : (Self.instagramPostCode(normalizedURL) == nil
+            direct ? "Download" : (InstagramResolver.shortcode(normalizedURL) == nil
               ? "Add to ClipShare"
               : "Continue with Instagram"),
             for: .normal
@@ -96,7 +114,7 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
         }
       }
     }
-    message.text = "Share a web link to add it to ClipShare."
+    message.text = "Share a supported Instagram, X, Pinterest, YouTube or direct media link."
   }
 
   private nonisolated static func extractURL(_ item: (any NSSecureCoding)?) -> URL? {
@@ -111,17 +129,15 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
 
   @objc private func save() {
     guard let sharedURL else { return }
-    if Self.instagramPostCode(sharedURL) != nil {
+    if InstagramResolver.shortcode(sharedURL) != nil {
       switch instagramState {
       case .idle:
         showInstagramPage(sharedURL)
-      case .retrySharedLink:
+      case .retrySharedLink, .signingIn:
         showInstagramPage(sharedURL)
-      case .connected:
-        disconnectInstagram()
       case .failed:
         showInstagramPage(sharedURL)
-      case .checking, .signingIn:
+      case .checking, .resolving, .queued:
         break
       }
       return
@@ -134,7 +150,11 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
           return
         }
       } else {
-        _ = try SharedLinks.enqueue(sharedURL)
+        guard try SharedLinks.enqueuePending(sharedURL) else {
+          message.text = "This link is already waiting in Downloads."
+          saveButton.isEnabled = false
+          return
+        }
       }
       close()
     } catch {
@@ -143,13 +163,17 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
   }
 
   private func showInstagramPage(_ url: URL) {
+    navigationGeneration += 1
+    resolutionAttempt = 0
+    responseStatus = 200
     instagramState = .checking
     webLoadTimeout?.cancel()
     saveButton.isEnabled = false
     saveButton.setTitle("Checking Instagram…", for: .normal)
     message.text = "Opening the shared post in Instagram…"
     webView.isHidden = false
-    webViewHeight.constant = 380
+    disconnectButton.isHidden = false
+    webViewHeight.constant = max(240, min(600, view.safeAreaLayoutGuide.layoutFrame.height * 0.65))
     UIView.animate(withDuration: 0.2) { self.view.layoutIfNeeded() }
     NSLog("ClipShare InstagramShare starting page load")
     webView.load(URLRequest(url: url))
@@ -201,7 +225,8 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
       failure.code
     )
     webLoadTimeout?.cancel()
-    guard instagramState == .checking || instagramState == .signingIn else { return }
+    guard failure.code != NSURLErrorCancelled,
+          instagramState == .checking || instagramState == .signingIn || instagramState == .resolving else { return }
     instagramState = .failed
     message.text = "Instagram could not load. Check your connection and retry."
     saveButton.setTitle("Retry Instagram", for: .normal)
@@ -227,11 +252,11 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
       return
     }
     NSLog("ClipShare InstagramShare allowed navigation scheme=%@ host=%@", url.scheme ?? "unknown", host)
-    if instagramHost && Self.isInstagramLogin(url) {
+    if navigationAction.targetFrame?.isMainFrame != false && instagramHost && Self.isInstagramLogin(url) {
       instagramState = .signingIn
       message.text = "Sign in to Instagram here. ClipShare does not see your password."
-      saveButton.setTitle("Finish sign-in to continue", for: .normal)
-      saveButton.isEnabled = false
+      saveButton.setTitle("Continue to shared post after sign-in", for: .normal)
+      saveButton.isEnabled = true
     }
     decisionHandler(.allow)
   }
@@ -240,25 +265,37 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
     guard let url = webView.url else { return }
     webLoadTimeout?.cancel()
     NSLog("ClipShare InstagramShare navigation finished host=%@", url.host?.lowercased() ?? "unknown")
-    if Self.isInstagramLogin(url) || Self.isInstagramChallenge(url) {
+    if Self.isInstagramChallenge(url) {
+      instagramState = .signingIn
+      message.text = "Complete Instagram’s security check here, then continue to the shared post."
+      saveButton.setTitle("Continue to shared post", for: .normal)
+      saveButton.isEnabled = true
+      instagramState = .retrySharedLink
+      return
+    }
+    if Self.isInstagramLogin(url) {
       instagramState = .signingIn
       message.text = "Sign in to Instagram here. ClipShare does not see your password."
-      saveButton.setTitle("Finish sign-in to continue", for: .normal)
-      saveButton.isEnabled = false
+      saveButton.setTitle("Continue to shared post after sign-in", for: .normal)
+      saveButton.isEnabled = true
       return
     }
     switch instagramState {
     case .signingIn:
-      instagramState = .retrySharedLink
-      message.text = "When Instagram sign-in is complete, continue to the shared post."
-      saveButton.setTitle("Continue to shared post", for: .normal)
-      saveButton.isEnabled = true
+      if let sharedURL { showInstagramPage(sharedURL) }
     case .checking:
-      instagramState = .connected
-      message.text = "Instagram is connected in ClipShare's share extension."
-      saveButton.setTitle("Disconnect Instagram", for: .normal)
-      saveButton.isEnabled = true
-    case .idle, .retrySharedLink, .connected, .failed:
+      if responseStatus == 404 || responseStatus == 410 {
+        failInstagram("This Instagram post is unavailable or you do not have access to it.")
+      } else if responseStatus >= 400 {
+        failInstagram("Instagram could not load this post. Retry after checking your connection or account.")
+      } else {
+        instagramState = .resolving
+        message.text = "Looking for media in the shared post…"
+        resolveInstagram(generation: navigationGeneration)
+      }
+    case .retrySharedLink:
+      if let sharedURL { showInstagramPage(sharedURL) }
+    case .idle, .resolving, .queued, .failed:
       break
     }
   }
@@ -269,6 +306,7 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
     decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
   ) {
     if let response = navigationResponse.response as? HTTPURLResponse {
+      if navigationResponse.isForMainFrame { responseStatus = response.statusCode }
       NSLog(
         "ClipShare InstagramShare response status=%ld host=%@",
         response.statusCode,
@@ -278,13 +316,16 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
     decisionHandler(.allow)
   }
 
-  private func disconnectInstagram() {
+  @objc private func disconnectInstagram() {
+    navigationGeneration += 1
+    webLoadTimeout?.cancel()
     let store = WKWebsiteDataStore.default()
     let types = WKWebsiteDataStore.allWebsiteDataTypes()
     store.fetchDataRecords(ofTypes: types) { [weak self] records in
       let instagramRecords = records.filter {
         let domain = $0.displayName.lowercased()
-        return domain == "instagram.com" || domain.hasSuffix(".instagram.com")
+        return domain == "instagram.com" || domain.hasSuffix(".instagram.com") ||
+          domain == "facebook.com" || domain.hasSuffix(".facebook.com")
       }
       store.removeData(ofTypes: types, for: instagramRecords) {
         DispatchQueue.main.async {
@@ -302,33 +343,83 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
     }
   }
 
-  private static func instagramPostCode(_ url: URL) -> String? {
-    guard let host = url.host?.lowercased(),
-          host == "instagram.com" || host.hasSuffix(".instagram.com")
-    else { return nil }
-    let components = url.pathComponents.filter { $0 != "/" }
-    let code: String?
-    if let first = components.first, ["p", "reel", "reels", "tv"].contains(first) {
-      code = components.dropFirst().first
-    } else if components.count >= 3, components[0] == "share",
-              ["p", "reel"].contains(components[1]) {
-      code = components[2]
-    } else {
-      code = nil
-    }
-    guard let code, code.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil
-    else { return nil }
-    return code
+  private func failInstagram(_ text: String) {
+    instagramState = .failed
+    message.text = text
+    saveButton.setTitle("Retry shared post", for: .normal)
+    saveButton.isEnabled = true
   }
 
-  private static func secureInstagramURL(_ url: URL) -> URL {
-    guard let host = url.host?.lowercased(),
-          host == "instagram.com" || host.hasSuffix(".instagram.com"),
-          url.scheme?.lowercased() == "http",
-          var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-    else { return url }
-    components.scheme = "https"
-    return components.url ?? url
+  private func resolveInstagram(generation: Int) {
+    guard instagramState == .resolving, generation == navigationGeneration else { return }
+    guard let sharedURL, let requestedCode = InstagramResolver.shortcode(sharedURL),
+          let finalURL = webView.url, let finalCode = InstagramResolver.shortcode(finalURL),
+          let source = SharedLinks.canonicalSource(finalURL) else {
+      failInstagram("Open the shared post in Instagram, then retry.")
+      return
+    }
+    let sharedAlias = sharedURL.path.hasPrefix("/share/")
+    guard sharedAlias || requestedCode == finalCode else {
+      failInstagram("Instagram opened a different post. Retry the original shared link.")
+      return
+    }
+    let code = sharedAlias ? finalCode : requestedCode
+    webView.evaluateJavaScript(InstagramResolver.pageJSONScript) { [weak self] result, error in
+      guard let self, generation == self.navigationGeneration, self.instagramState == .resolving else { return }
+      if error != nil {
+        self.failInstagram("Could not read the shared post. Check your connection and retry.")
+        return
+      }
+      guard let post = InstagramResolver.parse(result as? [String] ?? [], shortcode: code) else {
+        self.resolutionAttempt += 1
+        if self.resolutionAttempt < 5 {
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.resolveInstagram(generation: generation) }
+        } else {
+          self.failInstagram("This post could not be read. It may be unavailable, require sign-in, or use an unsupported Instagram format.")
+        }
+        return
+      }
+      guard !post.media.isEmpty else {
+        self.failInstagram("This Instagram post has no supported photo or MP4 media.")
+        return
+      }
+      var queued = 0
+      var duplicates = 0
+      var failed = post.total - post.media.count
+      let chosenFolder: String
+      do {
+        let entries = try SharedLinks.entries()
+        let key = SharedLinks.downloadKey(source)
+        let aliasKey = SharedLinks.downloadKey(sharedURL)
+        let pending = entries.first {
+          guard $0.state == .pending, let url = URL(string: $0.url) else { return false }
+          let pendingKey = SharedLinks.downloadKey(url)
+          return pendingKey == key || pendingKey == aliasKey
+        }
+        let fallback = entries.first { URL(string: $0.url).map(SharedLinks.downloadKey) == key && !($0.folder ?? "").isEmpty }
+        chosenFolder = pending.map { $0.folder ?? "" } ?? fallback?.folder ?? ""
+      } catch {
+        self.failInstagram("Couldn’t read Downloads. Check available storage and retry.")
+        return
+      }
+      for media in post.media {
+        do {
+          if try BackgroundDownloads.start(media.url, source: source, title: post.title, slot: media.slot, position: media.position, sourceAlias: sharedURL, folder: chosenFolder) { queued += 1 }
+          else { duplicates += 1 }
+        } catch { failed += 1 }
+      }
+      guard queued + duplicates > 0 else {
+        self.failInstagram("Couldn’t queue the post. Check available storage and retry.")
+        return
+      }
+      self.instagramState = .queued
+      self.saveButton.isEnabled = false
+      self.message.text = "\(queued) queued · \(duplicates) already added" + (failed > 0 ? " · \(failed) unsupported or failed. Retry the shared post for missing items." : "")
+      DispatchQueue.main.asyncAfter(deadline: .now() + (failed > 0 ? 2.5 : 0.8)) { [weak self] in
+        guard let self, self.instagramState == .queued, generation == self.navigationGeneration else { return }
+        self.close()
+      }
+    }
   }
 
   private static func isInstagramLogin(_ url: URL) -> Bool {
@@ -338,10 +429,13 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
 
   private static func isInstagramChallenge(_ url: URL) -> Bool {
     url.host?.lowercased().hasSuffix("instagram.com") == true &&
-      url.path.lowercased().contains("/challenge")
+      ["/challenge", "/checkpoint", "/two_factor"].contains(where: { url.path.lowercased().contains($0) })
   }
 
   @objc private func close() {
+    navigationGeneration += 1
+    webLoadTimeout?.cancel()
+    webView.stopLoading()
     extensionContext?.completeRequest(returningItems: nil)
   }
 }
