@@ -100,15 +100,23 @@ class LibraryHelp extends StatelessWidget {
         _section(
           context,
           'Save your first download',
-          'Paste a supported HTTPS link in Media link and tap Add link. You can also share a link from another app to ClipShare. '
+          'Paste a supported HTTPS link in Media link and tap the + button beside it. You can also share a link from another app to ClipShare. '
               'Social links marked Pending download need you to open ClipShare and tap the download button.',
         ),
         _section(
           context,
           'Supported links',
-          'Public Pinterest Pins and pin.it links, X posts, Instagram photos/Reels/carousels, and YouTube videos/Shorts with a combined audio/video MP4. '
-              'Direct HTTPS MP4, JPEG, PNG, and WebP links are supported. TikTok, playlists, and live streams without a downloadable MP4 are not supported. '
+          'Public Pinterest Pins and pin.it links, X posts, Instagram photos/Reels/carousels, YouTube videos/Shorts with a combined audio/video MP4, and public TikTok video links (including vm.tiktok.com and vt.tiktok.com shares). '
+              'Direct HTTPS MP4, JPEG, PNG, and WebP links are supported. TikTok photo slideshows, playlists, and live streams without a downloadable MP4 are not supported. '
               'Provider restrictions can change; private, deleted, restricted, or sign-in-only posts may be unavailable.',
+        ),
+        _section(
+          context,
+          'TikTok downloads',
+          'TikTok video links are resolved by TikWM, a public third-party service. '
+              'ClipShare sends the public post link without tracking parameters. It does not send passwords, account details, or website sessions. '
+              'Private, deleted, restricted, or photo-only posts may be unavailable. '
+              'If the service is busy, wait briefly and retry with a fresh public video link. TikTok downloads appear in the TikTok folder.',
         ),
         _section(
           context,
@@ -123,9 +131,17 @@ class LibraryHelp extends StatelessWidget {
         _section(
           context,
           'Folders, search, and selection',
-          'Create folders from the folder menu. Use an item’s menu to move it, or tap Select downloads for batch actions. '
-              'Select all visible respects your search and filters. Selected items remain selected when filters change; check the selected count before an action. '
-              'Removing a folder moves its items to Unfiled. Search matches titles, sources, and link paths. New links start in Unfiled. Pending items and retries keep their chosen folder across slides. Already-saved duplicates keep their existing folder; use Move to folder to change it.',
+          'Downloads are grouped automatically into Instagram, X, YouTube, TikTok, Pinterest, and Other folders. '
+              'Tap a folder to open it, then use the back arrow to return to all downloads. '
+              'Open search from the icon at the top right; it matches titles, sources, and link paths. '
+              'Use Select downloads for batch actions. Select all visible respects your search and filters. '
+              'Selected items remain selected when filters change; check the selected count before an action.',
+        ),
+        _section(
+          context,
+          'Appearance and library settings',
+          'Open Settings from the top bar to choose System, Light, or Dark appearance, a default media filter, and download order. '
+              'Your choices are saved on this device and restored when ClipShare opens again.',
         ),
         _section(
           context,

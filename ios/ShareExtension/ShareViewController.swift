@@ -114,7 +114,7 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
         }
       }
     }
-    message.text = "Share a supported Instagram, X, Pinterest, YouTube or direct media link."
+    message.text = "Share a supported Instagram, X, Pinterest, YouTube, TikTok or direct media link."
   }
 
   private nonisolated static func extractURL(_ item: (any NSSecureCoding)?) -> URL? {

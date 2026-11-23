@@ -7,6 +7,37 @@ import java.io.File
 /** Runs on a device without third-party test dependencies or network access. */
 @Suppress("DEPRECATION")
 class AndroidDownloadsTest : AndroidTestCase() {
+    fun testTikTokSharesResolveExtensionlessVideosAndRememberAliases() {
+        val created = mutableListOf<Long>()
+        val downloads = AndroidDownloads(context, enqueueTransfer = {
+            (Long.MAX_VALUE - 4000 - created.size).also { created += it }
+        }, transferState = { "downloading" })
+        val stamp = System.nanoTime().toString()
+        val source = Uri.parse("https://www.tiktok.com/@_/video/$stamp")
+        val shared = Uri.parse("https://vm.tiktok.com/Z$stamp/")
+        val media = Uri.parse("https://v16.tiktokcdn-us.com/video/clip/?signature=example")
+        var pending: Long? = null
+        try {
+            assertTrue(AndroidDownloads.socialLink(source))
+            assertTrue(AndroidDownloads.socialLink(shared))
+            assertTrue(AndroidDownloads.socialLink(Uri.parse("https://www.tiktok.com/t/Z$stamp/")))
+            assertFalse(AndroidDownloads.socialLink(Uri.parse("https://www.tiktok.com/@creator/photo/$stamp")))
+            assertFalse(AndroidDownloads.socialLink(Uri.parse("https://vm.tiktok.com.evil.test/Z$stamp")))
+            assertTrue(AndroidDownloads.tikTokMedia(media))
+            assertFalse(AndroidDownloads.tikTokMedia(Uri.parse("https://v16.tiktokcdn-us.com.evil.test/video/clip/")))
+            assertTrue(downloads.enqueue(shared))
+            pending = downloads.entries().single { it["url"] == shared.toString() }["id"].toString().toLong()
+            assertTrue(downloads.enqueueResolved(media, source, pending, "TikTok", 0, null, sharedSource = shared))
+            assertFalse(downloads.tracks(pending))
+            assertFalse(downloads.enqueue(shared))
+            assertFalse(downloads.enqueue(Uri.parse("https://www.tiktok.com/@another/video/$stamp?tracking=other")))
+            assertEquals(1, created.size)
+        } finally {
+            pending?.let(downloads::delete)
+            created.forEach(downloads::delete)
+        }
+    }
+
     fun testSharedPostAndFolderMutationsArePersistentAndAtomic() {
         val downloads = AndroidDownloads(context)
         val suffix = System.currentTimeMillis().toString()

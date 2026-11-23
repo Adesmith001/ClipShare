@@ -21,7 +21,7 @@ class ShareActivity : Activity() {
             .setOnDismissListener { finish() }
 
         if (url == null) {
-            dialog.setMessage("Share an X, Pinterest, Instagram, YouTube, or direct HTTPS media link.")
+            dialog.setMessage("Share an X, Pinterest, Instagram, YouTube, TikTok, or direct HTTPS media link.")
         } else {
             val pending = AndroidDownloads.socialLink(url)
             dialog.setMessage(if (pending) "Add this post from ${url.host} to Downloads? Open ClipShare to start it."

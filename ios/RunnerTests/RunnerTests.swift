@@ -3,6 +3,26 @@ import XCTest
 @testable import Runner
 
 final class RunnerTests: XCTestCase {
+  func testTikTokShortSharesAndExtensionlessVideoDownloads() throws {
+    let source = URL(string: "https://www.tiktok.com/@creator/video/6742501081818877190?tracking=first")!
+    let alias = URL(string: "https://vm.tiktok.com/ZExample/")!
+    let media = URL(string: "https://v16.tiktokcdn-us.com/video/clip/?signature=example")!
+    XCTAssertEqual(SharedLinks.canonicalSource(source)?.absoluteString, "https://www.tiktok.com/@_/video/6742501081818877190")
+    XCTAssertNotNil(SharedLinks.canonicalSource(alias))
+    XCTAssertNotNil(SharedLinks.canonicalSource(URL(string: "https://www.tiktok.com/t/ZExample/")!))
+    XCTAssertNil(SharedLinks.canonicalSource(URL(string: "https://www.tiktok.com/@creator/photo/123")!))
+    XCTAssertNil(SharedLinks.canonicalSource(URL(string: "https://vm.tiktok.com.evil.test/ZExample/")!))
+    XCTAssertTrue(SharedLinks.isResolvedVideo(media))
+    XCTAssertFalse(SharedLinks.isResolvedVideo(URL(string: "https://v16.tiktokcdn-us.com.evil.test/video/clip/")!))
+    XCTAssertTrue(try SharedLinks.enqueuePending(alias))
+    let pending = try XCTUnwrap(SharedLinks.entries().first)
+    BackgroundDownloads.testTaskStarter = { _ in }
+    XCTAssertTrue(try BackgroundDownloads.start(media, inApp: true, source: source, replacingID: pending.id, sourceAlias: alias))
+    XCTAssertEqual(try SharedLinks.entries().count, 1)
+    XCTAssertFalse(try SharedLinks.enqueuePending(alias))
+    XCTAssertFalse(try SharedLinks.enqueuePending(URL(string: "https://www.tiktok.com/@another/video/6742501081818877190")!))
+  }
+
   override func setUpWithError() throws {
     SharedLinks.testDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: SharedLinks.testDirectory!, withIntermediateDirectories: true)

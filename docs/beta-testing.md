@@ -1,12 +1,13 @@
-# ClipShare 0.2.0 beta testing
+# ClipShare 0.2.1 beta testing
 
-Candidate version: `0.2.0+9`. Updated: 18 November 2026.
+Candidate version: `0.2.1+10`. Updated: 23 November 2026.
 
 ## Implemented scope
 
-- Local folder create/rename/remove, move and Unfiled views; folders survive app relaunch and download replacement.
+- Automatic Instagram, X, YouTube, TikTok, Pinterest and Other folders for existing and new downloads; folders-only home, inline add button and collapsed search.
+- Persisted System/Light/Dark appearance, default media filter and download order, plus storage/help in Settings.
 - Combined source/title/path search, folder and media filters.
-- Selection and serial batch move, delete, retry/start, cancellation, and Photos/Gallery export with eligibility and result counts.
+- Selection and serial batch delete, retry/start, cancellation, and Photos/Gallery export with eligibility and result counts.
 - Confirmed local deletion that preserves exported copies, local storage display, Help and sanitized diagnostic copying.
 - Supported social-share intake, pending deduplication, individual corrupted-record isolation/recovery, native safe failure states and transfer reconciliation.
 - iPhone authenticated Instagram WebKit page parsing/queueing without cookie extraction. This implementation still requires signed-device sign-in and session verification.
@@ -75,9 +76,12 @@ All rows below are device checks, pending until recorded by a tester. Record pla
 - [ ] Cancel and retry a transfer, including after relaunch and from extension-created downloads; no resurrected deleted entry.
 - [ ] Remove pending/failed/saved/active entries; local files are freed and exported copies remain intact.
 - [ ] Decline Photos access or cancel Files export; local file remains available for another export.
-- [ ] Create, rename and remove folders; move individual/batch items; retry an item and verify its folder; relaunch and verify persistence.
+- [ ] Paste a public TikTok video and vm/vt or /t/ short share; test native share intake, retry, deduplication and playback with audio after relaunch. Confirm TikTok photo/private/unavailable posts fail clearly and the Help section explains the external resolver.
+- [ ] Home contains folders only; folder and search views contain media/selection controls.
+- [ ] Existing downloads appear in platform folders on upgrade; new pasted/shared downloads appear automatically; retries and carousel slides stay with their source. No manual folder actions appear.
+- [ ] Switch System/Light/Dark, default media filter and newest/oldest order; relaunch and verify persistence on Android and iOS. Simulate a preference write failure and verify an explanation appears.
 - [ ] Search by multiple words, source, and path while changing media/folder filters; clearing filters restores the library.
-- [ ] Select visible results, change filters and verify selected count; batch move/delete/retry/cancel/export; ineligible items skipped; failure of one item does not stop later eligible items.
+- [ ] Select visible results, change filters and verify selected count; batch delete/retry/cancel/export; ineligible items skipped; failure of one item does not stop later eligible items.
 - [ ] Low storage, one unreadable queue record, missing local file; healthy files remain accessible and failures explain recovery.
 - [ ] Populate a realistic library, start another download, and check scrolling/refresh responsiveness.
 - [ ] Small phone, landscape, large text, keyboard, VoiceOver/TalkBack; all actions reachable and labelled.
@@ -88,3 +92,15 @@ All rows below are device checks, pending until recorded by a tester. Record pla
 - Android release key configured locally or in CI; retain the same signing identity for future upgrades. No key was created by this change.
 - iOS owner-supplied certificate and App Group-enabled Runner/ShareExtension profiles, registered devices for the current development IPA route, and a private repository for signed artifacts.
 - Run the checks on the exact candidate commit. Signed export remains explicitly dispatched on main; no build was uploaded or distributed by the implementation task.
+
+## UI refresh verification — 23 November 2026
+- Formatting: clean. Flutter analyzer: no issues. Flutter tests: 34 passed.
+- Android debug APK: built successfully after the UI/settings changes.
+- Light/dark library, settings and platform-folder screenshots rendered and visually inspected.
+- Device runtime and iOS compilation/signing remain unverified for this revision on the Windows host.
+
+## Folders-only home and TikTok verification — 23 November 2026
+- 40 Flutter tests passed; analyzer clean; source formatting unchanged.
+- Live Dart resolver returned a TikTok signed video URL; CDN returned HTTP206 with video/mp4 and a valid MP4 ftyp header.
+- Android debug build and native instrumentation-test Kotlin compilation passed. Device instrumentation was not run.
+- Folders-only light/dark previews rendered and visually inspected. iOS compilation and on-device playback/background checks remain external acceptance steps.

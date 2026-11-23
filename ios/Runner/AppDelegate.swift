@@ -16,6 +16,32 @@ import UniformTypeIdentifiers
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let preferences = FlutterMethodChannel(
+      name: "clipshare/preferences",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    preferences.setMethodCallHandler { call, result in
+      let defaults = UserDefaults.standard
+      switch call.method {
+      case "read":
+        result(defaults.dictionary(forKey: "clipshare_settings") ?? [:])
+      case "write":
+        let allowed: [String: Set<String>] = [
+          "theme": ["system", "light", "dark"],
+          "filter": ["All", "Photos", "Videos"],
+          "sort": ["newest", "oldest"],
+        ]
+        guard let values = call.arguments as? [String: String],
+              Set(values.keys) == Set(allowed.keys),
+              values.allSatisfy({ allowed[$0.key]?.contains($0.value) == true }) else {
+          result(FlutterError(code: "invalid_argument", message: nil, details: nil))
+          return
+        }
+        defaults.set(values, forKey: "clipshare_settings")
+        result(true)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
     let channel = FlutterMethodChannel(
       name: "clipshare/shared_links",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()

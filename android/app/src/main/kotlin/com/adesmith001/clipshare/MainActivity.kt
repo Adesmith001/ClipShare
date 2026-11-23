@@ -27,6 +27,30 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        MethodChannel(messenger, "clipshare/preferences").setMethodCallHandler { call, result ->
+            val prefs = getSharedPreferences("clipshare_settings", Context.MODE_PRIVATE)
+            val allowed = mapOf(
+                "theme" to setOf("system", "light", "dark"),
+                "filter" to setOf("All", "Photos", "Videos"),
+                "sort" to setOf("newest", "oldest")
+            )
+            when (call.method) {
+                "read" -> result.success(allowed.keys.associateWith { prefs.getString(it, null) }
+                    .filterValues { it != null })
+                "write" -> {
+                    val values = call.arguments as? Map<*, *>
+                    if (values == null || values.keys != allowed.keys ||
+                        allowed.any { (key, options) -> values[key] !in options }) {
+                        result.error("invalid_argument", null, null)
+                    } else {
+                        val edit = prefs.edit()
+                        allowed.keys.forEach { edit.putString(it, values[it] as String) }
+                        result.success(edit.commit())
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         channel = MethodChannel(
             messenger, "clipshare/shared_links", StandardMethodCodec.INSTANCE,
             messenger.makeBackgroundTaskQueue()

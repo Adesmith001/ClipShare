@@ -70,12 +70,41 @@ enum SharedLinks {
 
   static func isResolvedVideo(_ url: URL) -> Bool {
     if isDirectVideo(url) { return true }
+    if isTikTokMedia(url) { return true }
     guard webURL(url) != nil, url.scheme == "https",
           url.host?.hasSuffix(".googlevideo.com") == true,
           url.path == "/videoplayback"
     else { return false }
     return URLComponents(url: url, resolvingAgainstBaseURL: false)?
       .queryItems?.contains { $0.name == "mime" && $0.value == "video/mp4" } == true
+  }
+
+  static func tikTokVideoID(_ url: URL) -> String? {
+    guard ["tiktok.com", "www.tiktok.com", "m.tiktok.com"].contains(url.host?.lowercased() ?? "") else { return nil }
+    for pattern in [#"^/@[\w.-]+/video/([0-9]+)/?$"#, #"^/v/([0-9]+)\.html/?$"#] {
+      let regex = try! NSRegularExpression(pattern: pattern)
+      if let match = regex.firstMatch(in: url.path, range: NSRange(url.path.startIndex..., in: url.path)),
+         let range = Range(match.range(at: 1), in: url.path) { return String(url.path[range]) }
+    }
+    return nil
+  }
+
+  static func isTikTokLink(_ url: URL) -> Bool {
+    guard webURL(url) != nil, url.scheme == "https" else { return false }
+    if tikTokVideoID(url) != nil { return true }
+    let host = url.host?.lowercased() ?? ""
+    if ["vm.tiktok.com", "vt.tiktok.com"].contains(host) {
+      return url.path.range(of: #"^/[\w-]+/?$"#, options: .regularExpression) != nil
+    }
+    return ["tiktok.com", "www.tiktok.com", "m.tiktok.com"].contains(host) &&
+      url.path.range(of: #"^/t/[\w-]+/?$"#, options: .regularExpression) != nil
+  }
+
+  static func isTikTokMedia(_ url: URL) -> Bool {
+    guard webURL(url) != nil, url.scheme == "https", let host = url.host?.lowercased() else { return false }
+    if ["tikwm.com", "www.tikwm.com"].contains(host) { return url.path.hasPrefix("/video/") }
+    return ["tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "tiktokv.com"]
+      .contains(where: { host == $0 || host.hasSuffix("." + $0) }) && url.path.contains("/video/")
   }
 
   static func downloadKey(_ url: URL) -> String {
@@ -92,6 +121,14 @@ enum SharedLinks {
 
   static func canonicalSource(_ url: URL) -> URL? {
     guard webURL(url) != nil, let host = url.host?.lowercased() else { return nil }
+    if isTikTokLink(url) {
+      if let id = tikTokVideoID(url) { return URL(string: "https://www.tiktok.com/@_/video/\(id)") }
+      var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+      parts?.query = nil
+      parts?.fragment = nil
+      parts?.path = url.path.hasSuffix("/") ? String(url.path.dropLast()) : url.path
+      return parts?.url
+    }
     let path = url.pathComponents.filter { $0 != "/" }
     let codePattern = "^[A-Za-z0-9_-]+$"
     func valid(_ code: String) -> Bool { code.range(of: codePattern, options: .regularExpression) != nil }

@@ -1,6 +1,6 @@
 # ClipShare
 
-ClipShare is a personal downloader for media shared from social apps. Version `0.2.0+9` adds local folders, search, selection and batch actions, queue recovery, and beta diagnostics.
+ClipShare is a personal downloader for media shared from social apps. Version `0.2.1+10` includes automatic platform folders, search, saved appearance and library settings, selection and batch actions, queue recovery, and beta diagnostics.
 
 ## Run the app
 
@@ -11,7 +11,7 @@ flutter pub get
 flutter run
 ```
 
-The app opens to Downloads. Paste a public Pinterest video Pin, a `pin.it` share link, an X video post, an Instagram Reel or video post, a YouTube video or Short, or a direct HTTPS MP4. ClipShare resolves public posts on-device and chooses from the MP4 renditions each provider makes available. YouTube requires a stream with video and audio together. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
+The app opens to Downloads. Paste a public Pinterest video Pin, a `pin.it` share link, an X video post, an Instagram Reel or video post, a YouTube video or Short, a public TikTok video or short share link, or a direct HTTPS MP4. ClipShare resolves Pinterest, X, Instagram, and YouTube posts on-device and chooses from the MP4 renditions each provider makes available. YouTube requires a stream with video and audio together. The palette uses deep plum (`#302435`), soft apricot (`#F5C5A5`), and warm ivory (`#FAF7F2`).
 
 ## Try Android sharing
 
@@ -21,17 +21,23 @@ For a failure check, share an MP4 URL that returns an error page. ClipShare shou
 
 ## Manage downloads
 
-Paste a supported URL into **Media link** and tap **Add link**. The library shows thumbnails, post titles when available, and download status. Direct HTTPS JPEG and PNG links, Pinterest photo Pins, public Instagram photo posts and carousels, and photos and videos from public X posts use the same queue. Each available item in a multi-item post gets its own entry. Use **Photos** and **Videos** to filter the library. Tap a saved thumbnail to play the video or view the image. Use **Retry download** for failed or cancelled entries. Android can cancel active transfers. On iOS, Cancel appears for transfers started in the current ClipShare session. Transfers started in the Share Extension continue under iOS background scheduling.
+Paste a supported URL into **Media link** and tap the **+** button beside it. The library shows thumbnails, post titles when available, and download status. Direct HTTPS JPEG and PNG links, Pinterest photo Pins, public Instagram photo posts and carousels, and photos and videos from public X posts use the same queue. Each available item in a multi-item post gets its own entry. Use **Photos** and **Videos** to filter the library. Tap a saved thumbnail to play the video or view the image. Use **Retry download** for failed or cancelled entries. Android can cancel active transfers. On iOS, Cancel appears for transfers started in the current ClipShare session. Transfers started in the Share Extension continue under iOS background scheduling.
 
 Use **Save to Gallery** on Android 10 or later. On iOS, open the item's export menu and choose **Save to Photos** or **Save to Files**. ClipShare keeps its local copy if you dismiss the export picker or decline Photos access.
 
 ## Folders, search, and batch actions
 
-Use **Manage folders → New folder** to create a flat local collection. Select a folder to rename it or remove it. Removing a folder moves its items to **Unfiled**; it does not delete media. New links start in Unfiled. Pending items and retries keep their chosen folder across slides, including Unfiled. Already-saved duplicates retain their existing folder; use Move to folder to relocate them. Use an item's menu to **Move to folder** or **Delete download**. Deletion removes the app-local media and entry; copies already exported to Photos, Gallery, or Files remain.
+Downloads are grouped into **Instagram**, **X**, **YouTube**, **TikTok**, **Pinterest**, and **Other** folders automatically, using the original post link. Folders appear as soon as a source has an entry, show saved/total counts, and include existing downloads. Tap a folder to open its media; use the back arrow to return to all downloads. The home screen shows only platform folders; media lists and selection controls appear when you open a folder or search. Manual folder creation and moving are no longer needed. Older folder metadata and local files are preserved for compatibility.
 
-Search matches titles, sources, and URL paths, and combines with the folder and Photos/Videos filters. URL tokens are not searched. Tap **Select downloads**, or long-press an item, to select entries. **Select all visible** respects the current filters. Selected entries remain selected when filters change; check the selected count. Use **Actions** to move, delete, retry/download, cancel, or save eligible media to Photos/Gallery. Batch results report completed, failed, and skipped entries. Deletion requires confirmation.
+Tap the **search icon at the top right** to open search. Search matches titles, sources, and URL paths; URL tokens are excluded. Search combines with the current platform and Photos/Videos filter. Close search to clear its query. Tap **Select downloads**, or long-press an item, to select entries. **Select all visible** respects the current filters. Selected entries remain selected when filters change; check the selected count. Batch actions can delete, retry/download, cancel, or export eligible media. Deletion requires confirmation and keeps exported copies.
 
-**Help and feedback** shows the version/build, local media storage, provider instructions, and a copyable diagnostic report. Reports exclude full URLs, media titles, folder names, passwords, and website sessions. Add reproduction steps and share the report manually with your beta organiser. Use Refresh or pull down to reload the library.
+Open **Settings** from the top bar to choose **System**, **Light**, or **Dark** appearance, the default **All/Photos/Videos** filter, and **Newest first/Oldest first** ordering. Preferences are saved on the device and restored after relaunch. Settings also shows local media storage and links to help and diagnostics.
+
+**Help and feedback** shows the version/build, local media storage, provider instructions, and a copyable diagnostic report. Reports exclude full URLs, media titles, folder names, passwords, and website sessions. Add reproduction steps and share the report manually with your beta organiser. Pull down to refresh the library.
+
+## TikTok resolver
+
+TikTok video downloads use [TikWM](https://www.tikwm.com/), a public third-party resolver. Only the public video link is sent, with tracking parameters removed; passwords, accounts, and website sessions are not sent. Long video URLs, `vm.tiktok.com`, `vt.tiktok.com`, and `/t/` shares are accepted. Signed MP4 URLs are checked against the TikTok/TikWM media hosts before queuing, and the native queues still validate downloaded files. TikTok photo slideshows, private/restricted/deleted posts and live streams are not supported. Service limits or provider changes can make a link temporarily unavailable; wait briefly and retry with a fresh link.
 
 ## Android release signing
 
@@ -59,7 +65,7 @@ To verify the handoff, open a page in Safari, share it to ClipShare, and tap **A
 
 For Instagram on iPhone, choose **ClipShare** from Instagram's share sheet. On the first use, sign in on Instagram's page shown inside the share sheet; ClipShare keeps the session in the extension's on-device WebKit store and does not collect your password. After that, sharing an Instagram Reel, photo, or carousel to ClipShare resolves and queues its supported media without opening the main app. If Instagram expires or challenges the session, sign in again in the share sheet. Use **Disconnect Instagram** there to clear the saved website session.
 
-Other supported social posts shared to ClipShare appear as deduplicated pending entries. Open ClipShare and tap **Download media** on a pending post. TikTok links still need provider support. Pasting an Instagram link into the main app does not use the Share Extension's Instagram session.
+Other supported social posts shared to ClipShare appear as deduplicated pending entries. Open ClipShare and tap **Download media** on a pending post. Public TikTok video links are supported through TikWM; short share links are resolved when you open their TikTok folder and tap Download media. Pasting an Instagram link into the main app does not use the Share Extension's Instagram session.
 
 To verify a download, open and share a direct HTTPS URL whose path ends in `.mp4`. Use a video you have permission to download and that has audio. Tap **Download** and stay in Safari until the transfer has had time to finish. Open ClipShare, check that the entry says **Saved**, and tap **Play video**. Verify that the video plays with audio and remains available after relaunch. An MP4 URL returning an error page should instead show **Download failed**.
 

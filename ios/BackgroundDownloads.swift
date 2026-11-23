@@ -99,7 +99,12 @@ final class BackgroundDownloads: NSObject, URLSessionDownloadDelegate, @unchecke
       if let testTaskStarter { testTaskStarter(url); return true }
       let download = BackgroundDownloads(id: entry.id, identifier: prefix + entry.id)
       let session = download.makeSession()
-      let task = session.downloadTask(with: url)
+      var request = URLRequest(url: url)
+      if SharedLinks.isTikTokLink(original) {
+        request.setValue("https://www.tiktok.com/", forHTTPHeaderField: "Referer")
+        request.setValue("ClipShare/0.2", forHTTPHeaderField: "User-Agent")
+      }
+      let task = session.downloadTask(with: request)
       appTasks[entry.id] = task
       appDownloads[download.identifier] = download
       sessions[download.identifier] = session

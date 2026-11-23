@@ -36,6 +36,7 @@ internal class AndroidDownloads(
 
         fun socialLink(url: Uri): Boolean {
             if (!url.scheme.equals("https", true) || url.host.isNullOrEmpty() || url.userInfo != null) return false
+            if (tikTokLink(url)) return true
             val host = url.host!!.lowercase()
             val path = url.path.orEmpty()
             return when {
@@ -58,6 +59,30 @@ internal class AndroidDownloads(
                 }
                 else -> false
             }
+        }
+
+        private fun tikTokVideoId(url: Uri): String? {
+            if (url.host?.lowercase() !in setOf("tiktok.com", "www.tiktok.com", "m.tiktok.com")) return null
+            return (Regex("^/@[\\w.-]+/video/([0-9]+)/?$").matchEntire(url.path.orEmpty())
+                ?: Regex("^/v/([0-9]+)\\.html/?$").matchEntire(url.path.orEmpty()))?.groupValues?.get(1)
+        }
+
+        private fun tikTokLink(url: Uri): Boolean {
+            if (!url.scheme.equals("https", true) || url.userInfo != null) return false
+            if (tikTokVideoId(url) != null) return true
+            return when (url.host?.lowercase()) {
+                "vm.tiktok.com", "vt.tiktok.com" -> Regex("^/[\\w-]+/?$").matches(url.path.orEmpty())
+                "tiktok.com", "www.tiktok.com", "m.tiktok.com" -> Regex("^/t/[\\w-]+/?$").matches(url.path.orEmpty())
+                else -> false
+            }
+        }
+
+        internal fun tikTokMedia(url: Uri): Boolean {
+            if (url.scheme != "https" || url.userInfo != null) return false
+            val host = url.host?.lowercase() ?: return false
+            if (host in setOf("tikwm.com", "www.tikwm.com")) return url.path?.startsWith("/video/") == true
+            return listOf("tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "tiktokv.com")
+                .any { host == it || host.endsWith(".$it") } && url.path?.contains("/video/") == true
         }
 
         fun supportedLink(url: Uri): Boolean = directVideo(url) || imageExtension(url) != null || socialLink(url)
@@ -83,6 +108,8 @@ internal class AndroidDownloads(
                 val host = url.host!!.lowercase()
                 val path = url.path.orEmpty()
                 return when {
+                    tikTokVideoId(url) != null -> "tiktok:${tikTokVideoId(url)}"
+                    tikTokLink(url) -> "$host:${path.trimEnd('/')}"
                     host == "pin.it" -> "pin.it:${url.pathSegments.single()}"
                     host == "pinterest.com" || host.endsWith(".pinterest.com") ->
                         "pinterest:${Regex("(?:[\\w-]+--)?([0-9]+)/?$").find(path)!!.groupValues[1]}"
@@ -144,8 +171,8 @@ internal class AndroidDownloads(
         require(
             image != null || directVideo(url) ||
                 (original != url && url.scheme == "https" && url.userInfo == null &&
-                    url.host?.endsWith(".googlevideo.com") == true && url.path == "/videoplayback" &&
-                    url.getQueryParameter("mime") == "video/mp4")
+                    ((url.host?.endsWith(".googlevideo.com") == true && url.path == "/videoplayback" &&
+                    url.getQueryParameter("mime") == "video/mp4") || (tikTokLink(original) && tikTokMedia(url))))
         )
         val source = original.toString()
         val rows = sourceRows()
@@ -194,6 +221,10 @@ internal class AndroidDownloads(
             .setDestinationInExternalFilesDir(
                 context, directory(image), "${UUID.randomUUID()}.${image ?: "mp4"}"
             )
+        if (tikTokLink(original)) {
+            request.addRequestHeader("Referer", "https://www.tiktok.com/")
+                .addRequestHeader("User-Agent", "ClipShare/0.2")
+        }
         val id = enqueueTransfer?.invoke(request) ?: manager.enqueue(request)
         val edit = history.edit().putString(id.toString(), source)
         if (image != null) edit.putString("image:$id", image)
