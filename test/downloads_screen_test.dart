@@ -35,8 +35,10 @@ void main() {
     });
     await tester.pumpWidget(const ClipShareApp());
     await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Search downloads'));
+    await tester.pumpAndSettle();
     expect(find.text('A quiet morning'), findsOneWidget);
-    expect(find.text('Pinterest'), findsOneWidget);
+    expect(find.text('Pinterest'), findsWidgets);
     expect(find.byTooltip('View image'), findsOneWidget);
     await tester.tap(find.byTooltip('Export image'));
     await tester.pumpAndSettle();
@@ -75,8 +77,10 @@ void main() {
 
     await tester.pumpWidget(const ClipShareApp());
     await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Search downloads'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('mediaLink')), url);
-    await tester.tap(find.text('Add link'));
+    await tester.tap(find.byTooltip('Add link'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(queued, url);
@@ -128,6 +132,8 @@ void main() {
       });
 
       await tester.pumpWidget(const ClipShareApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Search downloads'));
       await tester.pumpAndSettle();
 
       expect(find.text('Pending download'), findsOneWidget);

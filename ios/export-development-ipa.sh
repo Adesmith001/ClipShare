@@ -7,6 +7,26 @@ set -euo pipefail
 : "${IOS_RUNNER_PROFILE:?Set the IOS_RUNNER_PROFILE_BASE64 secret}"
 : "${IOS_EXTENSION_PROFILE:?Set the IOS_EXTENSION_PROFILE_BASE64 secret}"
 
+mode=${CLIPSHARE_DISTRIBUTION_MODE:-development}
+runner_bundle=com.adesmith001.clipshare
+expected_group=group.com.adesmith001.clipshare
+signing_identity='Apple Development'
+export_method=debugging
+flutter_options=()
+build_settings=()
+if [[ "$mode" == store-beta ]]; then
+  runner_bundle=com.adesmith001.clipshare.beta
+  expected_group=group.com.adesmith001.clipshare.beta
+  signing_identity='Apple Distribution'
+  export_method=app-store-connect
+  flutter_options=(--dart-define=STORE_BETA=true)
+  build_settings=("CLIPSHARE_BUNDLE_ID=$runner_bundle" "CLIPSHARE_APP_GROUP=$expected_group" 'CLIPSHARE_DISPLAY_NAME=ClipShare Beta' 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) STORE_BETA')
+elif [[ "$mode" != development ]]; then
+  echo 'Unsupported distribution mode.' >&2
+  exit 1
+fi
+extension_bundle="$runner_bundle.ShareExtension"
+
 work_dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/clipshare-signing.XXXXXX")
 keychain="$work_dir/clipshare.keychain-db"
 trap 'security delete-keychain "$keychain" >/dev/null 2>&1 || true' EXIT
@@ -27,22 +47,22 @@ install_profile() {
   printf '%s' "$encoded" | base64 -D > "$profile"
   security cms -D -i "$profile" -o "$plist"
   local uuid
-  uuid=$(python3 - "$plist" "$APPLE_TEAM_ID" "$bundle" <<'PY'
+  uuid=$(python3 - "$plist" "$APPLE_TEAM_ID" "$bundle" "$expected_group" "$mode" <<'PY'
 import plistlib
 import sys
 
-path, team, bundle = sys.argv[1:]
+path, team, bundle, group, mode = sys.argv[1:]
 with open(path, 'rb') as profile_file:
     profile = plistlib.load(profile_file)
 entitlements = profile['Entitlements']
 if (
     team not in profile['TeamIdentifier']
     or entitlements['application-identifier'] != f'{team}.{bundle}'
-    or 'group.com.adesmith001.clipshare' not in entitlements.get('com.apple.security.application-groups', [])
-    or not profile.get('ProvisionedDevices')
-    or not entitlements.get('get-task-allow')
+    or group not in entitlements.get('com.apple.security.application-groups', [])
+    or (mode == 'development' and (not profile.get('ProvisionedDevices') or not entitlements.get('get-task-allow')))
+    or (mode == 'store-beta' and (profile.get('ProvisionedDevices') or entitlements.get('get-task-allow')))
 ):
-    sys.exit(f'A development profile with the ClipShare App Group is required for {bundle}.')
+    sys.exit(f'A matching {mode} profile with the expected App Group is required for {bundle}.')
 print(profile['UUID'])
 PY
   ) || return 1
@@ -52,33 +72,31 @@ PY
   printf '%s' "$uuid"
 }
 
-runner_bundle=com.adesmith001.clipshare
-extension_bundle="$runner_bundle.ShareExtension"
 runner_profile=$(install_profile "$IOS_RUNNER_PROFILE" "$runner_bundle")
 extension_profile=$(install_profile "$IOS_EXTENSION_PROFILE" "$extension_bundle")
 
 flutter pub get --enforce-lockfile
-flutter build ios --release --config-only --no-codesign --no-pub
+flutter build ios --release --config-only --no-codesign --no-pub "${flutter_options[@]}"
 xcodebuild archive -workspace ios/Runner.xcworkspace -scheme Runner \
   -configuration Release -destination 'generic/platform=iOS' \
   -archivePath "$work_dir/ClipShare.xcarchive" \
-  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Development' \
+  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$signing_identity" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CLIPSHARE_RUNNER_PROFILE="$runner_profile" \
-  CLIPSHARE_EXTENSION_PROFILE="$extension_profile"
+  CLIPSHARE_EXTENSION_PROFILE="$extension_profile" "${build_settings[@]}"
 
-python3 - "$work_dir/ExportOptions.plist" "$APPLE_TEAM_ID" "$runner_profile" "$extension_profile" <<'PY'
+python3 - "$work_dir/ExportOptions.plist" "$APPLE_TEAM_ID" "$runner_profile" "$extension_profile" "$runner_bundle" "$export_method" <<'PY'
 import plistlib
 import sys
 
-path, team, app, extension = sys.argv[1:]
+path, team, app, extension, bundle, method = sys.argv[1:]
 with open(path, 'wb') as options:
     plistlib.dump({
-        'method': 'debugging',
+        'method': method,
         'signingStyle': 'manual',
         'teamID': team,
         'provisioningProfiles': {
-            'com.adesmith001.clipshare': app,
-            'com.adesmith001.clipshare.ShareExtension': extension,
+            bundle: app,
+            bundle + '.ShareExtension': extension,
         },
     }, options)
 PY
@@ -94,5 +112,5 @@ codesign --verify --deep --strict "$app"
 for bundle in "$app" "$app/PlugIns/ShareExtension.appex"; do
   codesign -d --entitlements - --xml "$bundle" > "$work_dir/entitlements.plist"
   group=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$work_dir/entitlements.plist")
-  [[ "$group" = group.com.adesmith001.clipshare ]]
+  [[ "$group" = "$expected_group" ]]
 done

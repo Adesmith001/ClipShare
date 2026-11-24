@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'build_mode.dart';
+
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 bool isHttpsLink(Uri? url) =>
@@ -40,12 +42,18 @@ class InstagramSignInRequired implements Exception {
   const InstagramSignInRequired();
 }
 
+class TikTokResolverUnavailable implements Exception {
+  const TikTokResolverUnavailable();
+}
+
 List<MediaItem> _single(Uri url) => [(url: url, slot: 0, position: null)];
 
 final _pinPath = RegExp(r'^/pin/(?:[\w-]+--)?([0-9]+)/?$');
 final _postPath = RegExp(r'^/(?:i/web|[^/]+)/status/([0-9]+)(?:/|$)');
 final _videoId = RegExp(r'^[A-Za-z0-9_-]{11}$');
 final _instagramPath = RegExp(r'^/(?:p|reels?|tv)/([\w-]+)/?$');
+final _tiktokPath = RegExp(r'^/@[\w.-]+/video/([0-9]+)/?$');
+final _tiktokMobilePath = RegExp(r'^/v/([0-9]+)\.html/?$');
 final _jsonScript = RegExp(
   r'<script\b[^>]*\btype="application/json"[^>]*>(.*?)</script>',
   dotAll: true,
@@ -94,17 +102,60 @@ String? _pinId(Uri url) {
   return _pinPath.firstMatch(url.path)?.group(1);
 }
 
+String? tikTokVideoId(Uri url) =>
+    const {'tiktok.com', 'www.tiktok.com', 'm.tiktok.com'}.contains(url.host)
+    ? (_tiktokPath.firstMatch(url.path) ??
+              _tiktokMobilePath.firstMatch(url.path))
+          ?.group(1)
+    : null;
+
+bool isTikTokLink(Uri? url) {
+  if (!isHttpsLink(url)) return false;
+  if (tikTokVideoId(url!) != null) return true;
+  if (const {'vm.tiktok.com', 'vt.tiktok.com'}.contains(url.host)) {
+    return RegExp(r'^/[\w-]+/?$').hasMatch(url.path);
+  }
+  return const {
+        'tiktok.com',
+        'www.tiktok.com',
+        'm.tiktok.com',
+      }.contains(url.host) &&
+      RegExp(r'^/t/[\w-]+/?$').hasMatch(url.path);
+}
+
+bool isTikTokMedia(Uri? url) {
+  if (!isHttpsLink(url)) return false;
+  final host = url!.host;
+  if (const {'tikwm.com', 'www.tikwm.com'}.contains(host)) {
+    return url.path.startsWith('/video/');
+  }
+  return const [
+        'tiktokcdn.com',
+        'tiktokcdn-us.com',
+        'tiktokcdn-eu.com',
+        'tiktokv.com',
+      ].any((domain) => host == domain || host.endsWith('.$domain')) &&
+      url.path.contains('/video/');
+}
+
 bool isSocialVideo(Uri? url) =>
+    !storeBeta &&
     isHttpsLink(url) &&
     (_pinId(url!) != null ||
         (url.host == 'pin.it' && url.pathSegments.length == 1) ||
         _xPostId(url) != null ||
         _youtubeId(url) != null ||
-        _instagramCode(url) != null);
+        _instagramCode(url) != null ||
+        isTikTokLink(url));
 
 // Match pending/retry metadata before the native queue learns a short-link alias.
 String mediaSourceKey(Uri? url) {
   if (url == null) return '';
+  final tiktok = tikTokVideoId(url);
+  if (tiktok != null) return 'tiktok:$tiktok';
+  if (isTikTokLink(url)) {
+    return '${url.host}:${url.path.replaceAll(RegExp(r'/$'), '')}';
+  }
   final youtube = _youtubeId(url);
   if (youtube != null) return 'youtube:$youtube';
   final post = _xPostId(url);
@@ -127,6 +178,7 @@ Future<ResolvedMedia> resolveSocialVideo(Uri url) async {
   if (youtubeId != null) return _resolveYouTube(youtubeId);
   final client = HttpClient()..connectionTimeout = _timeout;
   try {
+    if (isTikTokLink(url)) return await _resolveTikTok(client, url);
     final instagramCode = _instagramCode(url);
     if (instagramCode != null) {
       final source = Uri.https('www.instagram.com', '/p/$instagramCode');
@@ -228,6 +280,47 @@ Future<ResolvedMedia> resolveSocialVideo(Uri url) async {
   } finally {
     client.close(force: true);
   }
+}
+
+Future<ResolvedMedia> _resolveTikTok(HttpClient client, Uri url) async {
+  final requestedId = tikTokVideoId(url);
+  final source = requestedId == null
+      ? Uri(scheme: 'https', host: url.host, path: url.path)
+      : Uri.https('www.tiktok.com', '/@_/video/$requestedId');
+  // TikTok alone uses the public resolver. Send the post link without tracking
+  // parameters; provider sessions and cookies are never sent to this service.
+  final response = await _requestJson(
+    client,
+    Uri.https('www.tikwm.com', '/api/', {'url': source.toString(), 'hd': '1'}),
+    headers: {'Accept': 'application/json', 'User-Agent': 'ClipShare/0.2'},
+  );
+  if (_field(response, 'code') != 0) throw const TikTokResolverUnavailable();
+  final data = _field(response, 'data');
+  final id = _field(data, 'id');
+  final images = _field(data, 'images');
+  if (id is! String ||
+      !RegExp(r'^[0-9]+$').hasMatch(id) ||
+      (requestedId != null && requestedId != id) ||
+      (images is List && images.isNotEmpty)) {
+    throw const FormatException('TikTok video unavailable.');
+  }
+  for (final key in ['hdplay', 'play', 'wmplay']) {
+    final value = _field(data, key);
+    final candidate = value is String && value.isNotEmpty
+        ? Uri.tryParse(value)
+        : null;
+    final media = candidate == null
+        ? null
+        : Uri.https('www.tikwm.com', '/').resolveUri(candidate);
+    if (isTikTokMedia(media)) {
+      return (
+        source: Uri.https('www.tiktok.com', '/@_/video/$id'),
+        items: _single(media!),
+        title: _title(_field(data, 'title')),
+      );
+    }
+  }
+  throw const FormatException('No supported TikTok video.');
 }
 
 Future<ResolvedMedia> _resolveYouTube(String id) async {

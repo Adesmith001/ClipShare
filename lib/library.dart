@@ -1,4 +1,5 @@
 import 'social_video.dart';
+import 'build_mode.dart';
 
 typedef DownloadEntry = Map<Object?, Object?>;
 
@@ -12,6 +13,7 @@ String mediaSource(DownloadEntry entry) {
     'pinterest.com' || 'pin.it' => 'Pinterest',
     'twitter.com' || 'x.com' => 'X',
     'instagram.com' => 'Instagram',
+    'tiktok.com' || 'vm.tiktok.com' || 'vt.tiktok.com' => 'TikTok',
     _ => host,
   };
 }
@@ -19,6 +21,20 @@ String mediaSource(DownloadEntry entry) {
 bool mediaIsImage(DownloadEntry entry) =>
     entry['isImage'] == true ||
     isDirectImage(Uri.tryParse(entry['url'] as String? ?? ''));
+
+String mediaPlatform(DownloadEntry entry) {
+  if (storeBeta) return mediaIsImage(entry) ? 'Photos' : 'Videos';
+  final source = mediaSource(entry);
+  return const {
+        'Instagram',
+        'X',
+        'YouTube',
+        'Pinterest',
+        'TikTok',
+      }.contains(source)
+      ? source
+      : 'Other';
+}
 
 String mediaTitle(DownloadEntry entry) {
   if (entry['title'] case final String title when title.isNotEmpty) {
@@ -41,6 +57,7 @@ List<DownloadEntry> filterDownloads(
   String query = '',
   String type = 'All',
   String? folder,
+  String? platform,
 }) {
   final words = query
       .trim()
@@ -48,6 +65,7 @@ List<DownloadEntry> filterDownloads(
       .split(RegExp(r'\s+'))
       .where((s) => s.isNotEmpty);
   return entries.where((entry) {
+    if (platform != null && mediaPlatform(entry) != platform) return false;
     if (folder != null && (entry['folder'] as String? ?? '') != folder) {
       return false;
     }
@@ -78,6 +96,7 @@ bool canApply(String action, DownloadEntry entry) => switch (action) {
 };
 
 String downloadErrorMessage(String? code) => switch (code) {
+  'tiktok_unavailable' => 'TikTok couldn’t be resolved. Try again shortly, or copy a fresh public video link.',
   'photos_denied' => 'Allow Photos access in Settings, or save to Files.',
   'network' ||
   'network_error' ||

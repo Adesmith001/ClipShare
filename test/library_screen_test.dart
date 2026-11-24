@@ -68,7 +68,11 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  Future<void> open(WidgetTester tester, {Widget? child}) async {
+  Future<void> open(
+    WidgetTester tester, {
+    Widget? child,
+    bool showResults = true,
+  }) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     tester.view.resetPhysicalSize();
@@ -76,6 +80,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(child ?? const ClipShareApp());
     await tester.pumpAndSettle();
+    if (showResults) {
+      await tester.tap(find.byTooltip('Search downloads'));
+      await tester.pumpAndSettle();
+    }
   }
 
   testWidgets('search matches titles and sources without matching URL tokens', (
@@ -97,17 +105,14 @@ void main() {
     expect(find.text('No matching downloads'), findsOneWidget);
   });
 
-  testWidgets('folder filter combines with media filter', (tester) async {
-    await open(tester);
-    await tester.tap(find.byKey(const Key('folderFilter')));
+  testWidgets('platform folder combines with media filter', (tester) async {
+    await open(tester, showResults: false);
+    await tester.tap(find.byKey(const Key('platform:Other')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Travel').last);
-    await tester.pumpAndSettle();
-    expect(find.text('Morning walk'), findsOneWidget);
-    expect(find.text('Dinner ideas'), findsNothing);
     await tester.tap(find.text('Photos'));
     await tester.pumpAndSettle();
-    expect(find.text('No matching downloads'), findsOneWidget);
+    expect(find.text('Dinner ideas'), findsOneWidget);
+    expect(find.text('Morning walk'), findsNothing);
   });
 
   testWidgets('batch retry only retries eligible selected entries', (
@@ -152,30 +157,23 @@ void main() {
     },
   );
 
-  testWidgets('selected entries can move to a folder', (tester) async {
+  testWidgets('manual folder actions are removed', (tester) async {
     await open(tester);
-    await tester.tap(find.byTooltip('Select downloads'));
+    expect(find.byTooltip('Manage folders'), findsNothing);
+    await tester.tap(find.byTooltip('Export video'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('select:2')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('batchActions')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Move to folder'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Travel').last);
-    await tester.pumpAndSettle();
-    final move = actions.singleWhere((c) => c.method == 'move');
-    expect(move.arguments, {
-      'ids': ['2'],
-      'folder': 'Travel',
-    });
+    expect(find.text('Move to folder'), findsNothing);
+    expect(find.text('Delete download'), findsOneWidget);
   });
 
   testWidgets(
     'help shows build and sanitized feedback without private URL data',
     (tester) async {
       await open(tester);
-      await tester.tap(find.byTooltip('Help and feedback'));
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Help and feedback'));
+      await tester.tap(find.text('Help and feedback'));
       await tester.pumpAndSettle();
       expect(find.textContaining('0.2.0'), findsWidgets);
       expect(find.text('Copy diagnostic report'), findsOneWidget);
@@ -197,35 +195,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Search downloads'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('folder creation rejects duplicates before writing', (
-    tester,
-  ) async {
-    await open(tester);
-    await tester.tap(find.byTooltip('Manage folders'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('New folder'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Folder name'),
-      ' travel ',
-    );
-    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
-    await tester.pumpAndSettle();
-    expect(find.text('That folder name is already in use.'), findsOneWidget);
-    expect(actions.where((c) => c.method == 'createFolder'), isEmpty);
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Folder name'),
-      'Recipes',
-    );
-    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
-    await tester.pumpAndSettle();
-    expect(
-      actions.singleWhere((c) => c.method == 'createFolder').arguments,
-      'Recipes',
-    );
   });
 
   testWidgets('dismissing deletion keeps all local entries', (tester) async {
@@ -401,6 +373,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Search downloads'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 
@@ -477,7 +451,7 @@ void main() {
       find.byKey(const Key('mediaLink')),
       'https://x.com/another/status/123',
     );
-    await tester.tap(find.text('Add link'));
+    await tester.tap(find.byTooltip('Add link'));
     await tester.pumpAndSettle();
     final args =
         actions.singleWhere((c) => c.method == 'addResolved').arguments as Map;

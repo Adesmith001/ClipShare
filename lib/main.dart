@@ -8,7 +8,9 @@ import 'package:material_ui/material_ui.dart';
 import 'social_video.dart';
 import 'library.dart';
 import 'library_help.dart';
-import 'library_dialogs.dart';
+import 'settings.dart';
+import 'brand.dart';
+import 'build_mode.dart';
 
 const plum = Color(0xFF302435);
 const apricot = Color(0xFFF5C5A5);
@@ -16,32 +18,88 @@ const ivory = Color(0xFFFAF7F2);
 
 void main() => runApp(const ClipShareApp());
 
-class ClipShareApp extends StatelessWidget {
+class ClipShareApp extends StatefulWidget {
   const ClipShareApp({super.key});
+  @override
+  State<ClipShareApp> createState() => _ClipShareAppState();
+}
+
+class _ClipShareAppState extends State<ClipShareApp> {
+  final _preferences = AppPreferences();
+  @override
+  void initState() {
+    super.initState();
+    _preferences.load();
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'ClipShare',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: const ColorScheme.light(
-          primary: plum,
-          onPrimary: ivory,
+  void dispose() {
+    _preferences.dispose();
+    super.dispose();
+  }
+
+  ThemeData _theme(Brightness brightness) {
+    final dark = brightness == Brightness.dark;
+    final scheme = ColorScheme.fromSeed(seedColor: plum, brightness: brightness)
+        .copyWith(
+          primary: dark ? apricot : plum,
+          onPrimary: dark ? plum : ivory,
           secondary: apricot,
           onSecondary: plum,
-          surface: ivory,
-          onSurface: plum,
-        ),
-        scaffoldBackgroundColor: ivory,
+          surface: dark ? const Color(0xFF1D1820) : ivory,
+          onSurface: dark ? ivory : plum,
+          secondaryContainer: dark
+              ? const Color(0xFF503B47)
+              : const Color(0xFFF6DFCE),
+          onSecondaryContainer: dark ? ivory : plum,
+        );
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: scheme.surface,
+      appBarTheme: AppBarTheme(
+        backgroundColor: scheme.surface,
+        foregroundColor: scheme.onSurface,
+        elevation: 0,
       ),
-      home: const DownloadsScreen(),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: scheme.onSurface.withValues(alpha: 0.04),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: scheme.onSurface.withValues(alpha: 0.12),
+          ),
+        ),
+      ),
     );
   }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: _preferences,
+    builder: (context, _) => MaterialApp(
+      title: 'ClipShare',
+      debugShowCheckedModeBanner: false,
+      theme: _theme(Brightness.light),
+      darkTheme: _theme(Brightness.dark),
+      themeMode: _preferences.themeMode,
+      home: DownloadsScreen(preferences: _preferences),
+    ),
+  );
 }
 
 class DownloadsScreen extends StatefulWidget {
-  const DownloadsScreen({super.key, this.resolveMedia = resolveSocialVideo});
+  const DownloadsScreen({
+    super.key,
+    this.resolveMedia = resolveSocialVideo,
+    this.preferences,
+  });
+  final AppPreferences? preferences;
   final Future<ResolvedMedia> Function(Uri) resolveMedia;
 
   @override
@@ -60,11 +118,12 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   bool _busy = false;
   bool _selecting = false;
   String? _folder;
-  List<String> _folders = const [];
+  late final AppPreferences _preferences;
+  bool _searching = false;
   final _selected = <String>{};
   String? _lastError;
   int _refreshVersion = 0;
-  String _filter = 'All';
+  String? _filter;
   final _thumbnails = <String, Future<Uint8List?>>{};
 
   bool get _hasNativeDownloads =>
@@ -75,6 +134,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   @override
   void initState() {
     super.initState();
+    _preferences = widget.preferences ?? AppPreferences();
+    if (widget.preferences == null) _preferences.load();
+    _preferences.addListener(_preferencesChanged);
     _lifecycle = AppLifecycleListener(
       onResume: _reload,
       onInactive: () => _progressTimer?.cancel(),
@@ -89,6 +151,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
   @override
   void dispose() {
+    _preferences.removeListener(_preferencesChanged);
+    if (widget.preferences == null) _preferences.dispose();
     _lifecycle.dispose();
     _progressTimer?.cancel();
     _link.dispose();
@@ -143,7 +207,11 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       return;
     }
     if (!isDirectVideo(url) && !isDirectImage(url)) {
-      _showMessage('Paste a supported post link or a direct media link.');
+      _showMessage(
+        storeBeta
+            ? 'Paste a direct HTTPS MP4, JPEG, PNG, or WebP file link.'
+            : 'Paste a supported post link or a direct media link.',
+      );
       return;
     }
     setState(() => _adding = true);
@@ -259,6 +327,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       }
       if (refresh) await _refreshSharedLinks();
       return failed == 0 && queued > 0;
+    } on TikTokResolverUnavailable {
+      _recordError('tiktok_unavailable', quiet: quiet);
     } on InstagramSignInRequired {
       if (mounted) {
         _recordError(
@@ -307,22 +377,26 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     if (mounted) await _reload();
   }
 
-  Future<void> _reload() async {
-    if (_busy) return;
-    await _refreshSharedLinks();
-    if (!_hasNativeDownloads) return;
-    try {
-      final value = await _channel.invokeMethod<Object?>('folders');
-      if (!mounted) return;
-      setState(() {
-        _folders = value is List ? value.whereType<String>().toList() : [];
-        if (_folder != null && _folder != '' && !_folders.contains(_folder)) {
-          _folder = null;
-        }
-      });
-    } on PlatformException catch (error) {
-      _recordError(error.code);
-    }
+  void _preferencesChanged() {
+    if (mounted) setState(() => _filter = null);
+  }
+
+  Future<void> _reload() => _refreshSharedLinks();
+  Future<void> _showSettings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(
+          preferences: _preferences,
+          storage: formatBytes(
+            _sharedLinks.fold<num>(
+              0,
+              (sum, entry) => sum + (entry['sizeBytes'] as num? ?? 0),
+            ),
+          ),
+          onHelp: _showHelp,
+        ),
+      ),
+    );
   }
 
   Future<void> _showHelp() async {
@@ -369,79 +443,6 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       ) ??
       false;
 
-  Future<String?> _pickFolder() => showDialog<String>(
-    context: context,
-    builder: (context) => SimpleDialog(
-      title: const Text('Move to folder'),
-      children: [
-        for (final folder in ['', ..._folders])
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, folder),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(folder.isEmpty ? 'Unfiled' : folder),
-            ),
-          ),
-      ],
-    ),
-  );
-
-  Future<void> _editFolder({String? existing}) async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => FolderNameDialog(folders: _folders, existing: existing),
-    );
-    if (name == null || !mounted) return;
-    try {
-      final done = await _channel.invokeMethod<bool>(
-        existing == null ? 'createFolder' : 'renameFolder',
-        existing == null ? name : {'from': existing, 'to': name},
-      );
-      if (done == false) {
-        _showMessage('The folder could not be changed. Refresh and try again.');
-        return;
-      }
-      if (mounted) setState(() => _folder = name);
-      await _reload();
-    } on PlatformException catch (failure) {
-      _recordError(failure.code);
-    }
-  }
-
-  Future<void> _removeFolder(String folder) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove folder?'),
-        content: Text(
-          'Items in “$folder” will move to Unfiled. No media will be deleted.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove folder'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      final done = await _channel.invokeMethod<bool>('deleteFolder', folder);
-      if (done == false) {
-        _showMessage('The folder has changed. Refresh and try again.');
-        return;
-      }
-      if (mounted) setState(() => _folder = '');
-      await _reload();
-    } on PlatformException catch (error) {
-      _recordError(error.code);
-    }
-  }
-
   void _toggleSelection(String id) => setState(() {
     if (!_selected.add(id)) _selected.remove(id);
   });
@@ -458,80 +459,63 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         .toList();
     if (action == 'delete' && !await _confirmDelete(snapshot.length)) return;
     if (!mounted) return;
-    String? destination;
-    if (action == 'move') {
-      destination = await _pickFolder();
-      if (destination == null || !mounted) return;
-    }
     setState(() => _busy = true);
     var completed = 0;
     var failed = 0;
     var skipped = 0;
     String? failureCode;
     try {
-      if (action == 'move') {
-        final done = await _channel.invokeMethod<bool>('move', {
-          'ids': snapshot.map((entry) => entry['id'] as String).toList(),
-          'folder': destination,
-        });
-        if (done == true) {
-          completed = snapshot.length;
-        } else {
-          failed = snapshot.length;
+      for (final entry in snapshot) {
+        final eligibility =
+            action == 'saveToPhotos' || action == 'exportToFiles'
+            ? 'export'
+            : action;
+        if (!canApply(eligibility, entry)) {
+          skipped++;
+          continue;
         }
-      } else {
-        for (final entry in snapshot) {
-          final eligibility =
-              action == 'saveToPhotos' || action == 'exportToFiles'
-              ? 'export'
-              : action;
-          if (!canApply(eligibility, entry)) {
-            skipped++;
-            continue;
+        try {
+          final id = entry['id'] as String;
+          final url = Uri.tryParse(entry['url'] as String);
+          final bool done;
+          String? attemptError;
+          if (action == 'retry' &&
+              url != null &&
+              (isSocialVideo(url) || entry['state'] == 'pending')) {
+            done = await _downloadPost(
+              url,
+              replacing: id,
+              onlySlot: entry['state'] == 'pending'
+                  ? null
+                  : entry['slot'] as int? ?? 0,
+              quiet: true,
+              refresh: false,
+            );
+            if (!done) {
+              attemptError = _lastError;
+              failureCode = attemptError ?? failureCode;
+            }
+          } else {
+            final method =
+                action == 'export' &&
+                    defaultTargetPlatform == TargetPlatform.iOS
+                ? 'saveToPhotos'
+                : action;
+            done = await _channel.invokeMethod<bool>(method, id) == true;
           }
-          try {
-            final id = entry['id'] as String;
-            final url = Uri.tryParse(entry['url'] as String);
-            final bool done;
-            String? attemptError;
-            if (action == 'retry' &&
-                url != null &&
-                (isSocialVideo(url) || entry['state'] == 'pending')) {
-              done = await _downloadPost(
-                url,
-                replacing: id,
-                onlySlot: entry['state'] == 'pending'
-                    ? null
-                    : entry['slot'] as int? ?? 0,
-                quiet: true,
-                refresh: false,
-              );
-              if (!done) {
-                attemptError = _lastError;
-                failureCode = attemptError ?? failureCode;
-              }
-            } else {
-              final method =
-                  action == 'export' &&
-                      defaultTargetPlatform == TargetPlatform.iOS
-                  ? 'saveToPhotos'
-                  : action;
-              done = await _channel.invokeMethod<bool>(method, id) == true;
-            }
-            if (done) {
-              completed++;
-            } else if (attemptError != null) {
-              failed++;
-            } else {
-              skipped++;
-            }
-          } on PlatformException catch (error) {
+          if (done) {
+            completed++;
+          } else if (attemptError != null) {
             failed++;
-            failureCode = error.code;
-            _recordError(error.code, quiet: true);
+          } else {
+            skipped++;
           }
-          if (!mounted) return;
+        } on PlatformException catch (error) {
+          failed++;
+          failureCode = error.code;
+          _recordError(error.code, quiet: true);
         }
+        if (!mounted) return;
       }
     } on PlatformException catch (error) {
       failed = snapshot.length;
@@ -760,15 +744,6 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                         color: theme.colorScheme.error,
                       ),
                     ),
-                  if ((entry['folder'] as String? ?? '').isNotEmpty)
-                    Text(
-                      entry['folder'] as String,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -819,10 +794,6 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                       child: Text('Save to Gallery'),
                     ),
                 const PopupMenuItem(
-                  value: 'move',
-                  child: Text('Move to folder'),
-                ),
-                const PopupMenuItem(
                   value: 'delete',
                   child: Text('Delete download'),
                 ),
@@ -834,125 +805,133 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     );
   }
 
-  List<DownloadEntry> get _visible => filterDownloads(
-    _sharedLinks,
-    query: _search.text,
-    type: _filter,
-    folder: _folder,
-  );
+  List<DownloadEntry> get _visible {
+    final entries = filterDownloads(
+      _sharedLinks,
+      query: _search.text,
+      type: _filter ?? _preferences.filter,
+      platform: _folder,
+    );
+    return _preferences.sort == 'oldest' ? entries.reversed.toList() : entries;
+  }
 
-  Widget _linkInput(double width) {
-    final field = TextField(
-      key: const Key('mediaLink'),
-      controller: _link,
-      enabled: !_adding && !_busy,
-      decoration: InputDecoration(
-        labelText: 'Media link',
-        hintText: 'Paste a post or file link',
-        prefixIcon: const Icon(Icons.link_rounded),
-        filled: true,
-        fillColor: apricot.withValues(alpha: 0.18),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      keyboardType: TextInputType.url,
-      textInputAction: TextInputAction.done,
-      autocorrect: false,
-      onSubmitted: (_) => _addLink(),
-    );
-    final button = FilledButton(
-      onPressed: _adding || _busy ? null : _addLink,
-      child: const Text('Add link'),
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (width < 460 || MediaQuery.textScalerOf(context).scale(16) > 20) ...[
-          field,
-          const SizedBox(height: 8),
-          Align(alignment: Alignment.centerRight, child: button),
-        ] else
-          Row(
-            children: [
-              Expanded(child: field),
-              const SizedBox(width: 12),
-              button,
-            ],
+  Widget _linkInput() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: TextField(
+              key: const Key('mediaLink'),
+              controller: _link,
+              enabled: !_adding && !_busy,
+              decoration: const InputDecoration(
+                labelText: 'Media link',
+                hintText: storeBeta
+                    ? 'Paste a direct file link'
+                    : 'Paste a post or file link',
+                prefixIcon: Icon(Icons.link_rounded),
+              ),
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.done,
+              autocorrect: false,
+              onSubmitted: (_) => _addLink(),
+            ),
           ),
-        if (_adding || _busy) ...[
-          const SizedBox(height: 8),
-          const LinearProgressIndicator(minHeight: 2),
-          const SizedBox(height: 6),
-          Semantics(
-            liveRegion: true,
-            child: Text(_adding ? 'Resolving link…' : 'Updating downloads…'),
+          const SizedBox(width: 10),
+          SizedBox.square(
+            dimension: 56,
+            child: IconButton.filled(
+              tooltip: 'Add link',
+              onPressed: _adding || _busy ? null : _addLink,
+              icon: const Icon(Icons.add_rounded, size: 28),
+              style: IconButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
           ),
         ],
+      ),
+      if (_adding || _busy) ...[
+        const SizedBox(height: 8),
+        const LinearProgressIndicator(minHeight: 2),
+        const SizedBox(height: 6),
+        Semantics(
+          liveRegion: true,
+          child: Text(_adding ? 'Resolving link…' : 'Updating downloads…'),
+        ),
+      ],
+    ],
+  );
+  Widget _platformFolders(double width) {
+    final platforms =
+        (storeBeta
+                ? ['Videos', 'Photos']
+                : ['Instagram', 'X', 'YouTube', 'TikTok', 'Pinterest', 'Other'])
+            .where(
+              (platform) =>
+                  _sharedLinks.any((entry) => mediaPlatform(entry) == platform),
+            );
+    final columns = width >= 650 ? 4 : 2;
+    final tileWidth = (width - (columns - 1) * 12) / columns;
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        for (final platform in platforms)
+          SizedBox(width: tileWidth, child: _platformTile(platform)),
       ],
     );
   }
 
-  Widget _folderControls() => Row(
-    children: [
-      Expanded(
-        child: PopupMenuButton<int>(
-          key: const Key('folderFilter'),
-          tooltip: 'Choose folder',
-          enabled: !_busy && !_adding,
-          onSelected: (value) => setState(
-            () => _folder = value == -1
-                ? null
-                : value == 0
-                ? ''
-                : _folders[value - 1],
-          ),
-          itemBuilder: (_) => [
-            const PopupMenuItem(value: -1, child: Text('All downloads')),
-            const PopupMenuItem(value: 0, child: Text('Unfiled')),
-            for (final (index, folder) in _folders.indexed)
-              PopupMenuItem(value: index + 1, child: Text(folder)),
-          ],
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(
-              children: [
-                const Icon(Icons.folder_outlined, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _folder == null
-                        ? 'All downloads'
-                        : _folder!.isEmpty
-                        ? 'Unfiled'
-                        : _folder!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Icon(Icons.expand_more_rounded),
-              ],
-            ),
+  Widget _platformTile(String platform) {
+    final scheme = Theme.of(context).colorScheme;
+    final entries = _sharedLinks.where(
+      (entry) => mediaPlatform(entry) == platform,
+    );
+    final saved = entries.where((entry) => entry['state'] == 'saved').length;
+    final color = switch (platform) {
+      'Instagram' => const Color(0xFFB9537A),
+      'YouTube' => const Color(0xFFC35C49),
+      'Pinterest' => const Color(0xFFAD4755),
+      'X' => const Color(0xFF677B9D),
+      _ => const Color(0xFF6B8875),
+    };
+    return Material(
+      color: color.withValues(
+        alpha: Theme.of(context).brightness == Brightness.dark ? 0.20 : 0.09,
+      ),
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        key: Key('platform:$platform'),
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => setState(() => _folder = platform),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.folder_rounded, color: color, size: 40),
+              const SizedBox(height: 12),
+              Text(
+                platform,
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '$saved saved · ${entries.length} total',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            ],
           ),
         ),
       ),
-      PopupMenuButton<String>(
-        tooltip: 'Manage folders',
-        enabled: !_busy && !_adding,
-        icon: const Icon(Icons.create_new_folder_outlined),
-        onSelected: (value) {
-          if (value == 'create') _editFolder();
-          if (value == 'rename') _editFolder(existing: _folder);
-          if (value == 'remove' && _folder != null) _removeFolder(_folder!);
-        },
-        itemBuilder: (_) => [
-          const PopupMenuItem(value: 'create', child: Text('New folder')),
-          if (_folder?.isNotEmpty == true) ...[
-            const PopupMenuItem(value: 'rename', child: Text('Rename folder')),
-            const PopupMenuItem(value: 'remove', child: Text('Remove folder')),
-          ],
-        ],
-      ),
-    ],
-  );
+    );
+  }
 
   Widget _selectionBar(List<DownloadEntry> visible) {
     final entries = _sharedLinks
@@ -988,7 +967,6 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           enabled: entries.isNotEmpty && !_busy && !_adding,
           onSelected: (action) => _runBatch(action, entries),
           itemBuilder: (_) => [
-            const PopupMenuItem(value: 'move', child: Text('Move to folder')),
             PopupMenuItem(
               value: 'retry',
               enabled: entries.any((e) => canApply('retry', e)),
@@ -1042,228 +1020,304 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final visible = _visible;
+    final showMedia = _folder != null || _searching;
     final totalBytes = _sharedLinks.fold<num>(
       0,
       (sum, entry) => sum + (entry['sizeBytes'] as num? ?? 0),
     );
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1000),
-            child: LayoutBuilder(
-              builder: (context, constraints) => RefreshIndicator(
-                onRefresh: _reload,
-                child: CustomScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                      sliver: SliverToBoxAdapter(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 30,
-                                  height: 30,
-                                  decoration: BoxDecoration(
-                                    color: apricot,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                    Icons.download_rounded,
-                                    size: 18,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'ClipShare',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.w700,
+    return PopScope<void>(
+      canPop: _folder == null && !_searching && !_selecting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        setState(() {
+          if (_selecting) {
+            _selecting = false;
+            _selected.clear();
+          } else if (_searching) {
+            _searching = false;
+            _search.clear();
+            FocusScope.of(context).unfocus();
+          } else {
+            _folder = null;
+          }
+        });
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1000),
+              child: LayoutBuilder(
+                builder: (context, constraints) => RefreshIndicator(
+                  onRefresh: _reload,
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                        sliver: SliverToBoxAdapter(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const ClipShareMark(),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'ClipShare',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                     ),
                                   ),
-                                ),
-                                IconButton(
-                                  tooltip: 'Refresh downloads',
-                                  onPressed: _busy || _adding ? null : _reload,
-                                  icon: const Icon(Icons.refresh_rounded),
-                                ),
-                                IconButton(
-                                  tooltip: 'Help and feedback',
-                                  onPressed: _busy ? null : _showHelp,
-                                  icon: const Icon(Icons.help_outline_rounded),
-                                ),
-                                IconButton(
-                                  tooltip: 'Select downloads',
-                                  onPressed:
-                                      _busy || _adding || _sharedLinks.isEmpty
-                                      ? null
-                                      : () => setState(() {
-                                          _selecting = !_selecting;
-                                          if (!_selecting) _selected.clear();
-                                        }),
-                                  icon: Icon(
-                                    _selecting
-                                        ? Icons.check_box_outlined
-                                        : Icons.checklist_rounded,
+                                  IconButton(
+                                    tooltip: 'Settings',
+                                    onPressed: _busy || _adding
+                                        ? null
+                                        : _showSettings,
+                                    icon: const Icon(Icons.tune_rounded),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Semantics(
-                              header: true,
-                              child: Text(
-                                'Downloads',
-                                style: theme.textTheme.displaySmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -1.6,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${_sharedLinks.length} items · ${formatBytes(totalBytes)} on this device',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                            if (_hasNativeDownloads) ...[
-                              const SizedBox(height: 18),
-                              _linkInput(constraints.maxWidth - 40),
-                            ],
-                            const SizedBox(height: 16),
-                            TextField(
-                              key: const Key('librarySearch'),
-                              controller: _search,
-                              onChanged: (_) => setState(() {}),
-                              decoration: InputDecoration(
-                                hintText: 'Search downloads',
-                                prefixIcon: const Icon(Icons.search_rounded),
-                                suffixIcon: _search.text.isEmpty
-                                    ? null
-                                    : IconButton(
-                                        tooltip: 'Clear search',
-                                        onPressed: () =>
-                                            setState(_search.clear),
-                                        icon: const Icon(Icons.close_rounded),
-                                      ),
-                                border: const OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                            ),
-                            _folderControls(),
-                            Wrap(
-                              spacing: 8,
-                              children: [
-                                for (final filter in [
-                                  'All',
-                                  'Photos',
-                                  'Videos',
-                                ])
-                                  ChoiceChip(
-                                    label: Text(filter),
-                                    selected: _filter == filter,
-                                    showCheckmark: false,
-                                    selectedColor: apricot,
-                                    onSelected: (_) =>
-                                        setState(() => _filter = filter),
+                                  IconButton(
+                                    tooltip: _searching
+                                        ? 'Close search'
+                                        : 'Search downloads',
+                                    onPressed: () => setState(() {
+                                      _searching = !_searching;
+                                      if (!_searching) {
+                                        _search.clear();
+                                        FocusScope.of(context).unfocus();
+                                      }
+                                    }),
+                                    icon: Icon(
+                                      _searching
+                                          ? Icons.close_rounded
+                                          : Icons.search_rounded,
+                                    ),
                                   ),
-                              ],
-                            ),
-                            if (_selecting) _selectionBar(visible),
-                            const SizedBox(height: 12),
-                            const Divider(height: 1),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (_inboxUnavailable || visible.isEmpty)
-                      SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                _inboxUnavailable
-                                    ? Icons.cloud_off_outlined
-                                    : Icons.download_outlined,
-                                size: 36,
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                _inboxUnavailable
-                                    ? 'Downloads are unavailable.'
-                                    : _sharedLinks.isEmpty
-                                    ? 'No downloads yet'
-                                    : 'No matching downloads',
-                                textAlign: TextAlign.center,
-                                style: theme.textTheme.titleMedium,
+                                ],
                               ),
                               const SizedBox(height: 8),
-                              Text(
-                                _inboxUnavailable
-                                    ? 'Refresh to try loading your library again.'
-                                    : _sharedLinks.isEmpty
-                                    ? 'Paste a supported link above, or share one from another app to ClipShare.'
-                                    : 'Try another search or change the folder and media filters.',
-                                textAlign: TextAlign.center,
-                              ),
-                              const SizedBox(height: 12),
-                              TextButton(
-                                onPressed: _inboxUnavailable
-                                    ? _reload
-                                    : _sharedLinks.isEmpty
-                                    ? _showHelp
-                                    : () => setState(() {
-                                        _search.clear();
-                                        _folder = null;
-                                        _filter = 'All';
-                                      }),
+                              Semantics(
+                                header: true,
                                 child: Text(
-                                  _inboxUnavailable
-                                      ? 'Try again'
-                                      : _sharedLinks.isEmpty
-                                      ? 'How ClipShare works'
-                                      : 'Clear filters',
+                                  'Downloads',
+                                  style: theme.textTheme.displaySmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -1.6,
+                                  ),
                                 ),
                               ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${_sharedLinks.length} items · ${formatBytes(totalBytes)} on this device',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                              if (_hasNativeDownloads) ...[
+                                const SizedBox(height: 18),
+                                _linkInput(),
+                              ],
+                              if (_searching) ...[
+                                const SizedBox(height: 16),
+                                TextField(
+                                  key: const Key('librarySearch'),
+                                  controller: _search,
+                                  autofocus: true,
+                                  onChanged: (_) => setState(() {}),
+                                  decoration: InputDecoration(
+                                    hintText: 'Search downloads',
+                                    prefixIcon: const Icon(
+                                      Icons.search_rounded,
+                                    ),
+                                    suffixIcon: _search.text.isEmpty
+                                        ? null
+                                        : IconButton(
+                                            tooltip: 'Clear search',
+                                            onPressed: () =>
+                                                setState(_search.clear),
+                                            icon: const Icon(
+                                              Icons.close_rounded,
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 24),
+                              if (_folder == null &&
+                                  !_searching &&
+                                  _sharedLinks.isNotEmpty) ...[
+                                Text(
+                                  'Your folders',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _platformFolders(constraints.maxWidth - 40),
+                                const SizedBox(height: 24),
+                              ],
+                              if (showMedia) ...[
+                                Row(
+                                  children: [
+                                    if (_folder != null)
+                                      IconButton(
+                                        tooltip: 'All downloads',
+                                        onPressed: () =>
+                                            setState(() => _folder = null),
+                                        icon: const Icon(
+                                          Icons.arrow_back_rounded,
+                                        ),
+                                      ),
+                                    Expanded(
+                                      child: Text(
+                                        _folder ?? 'Search results',
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Select downloads',
+                                      onPressed:
+                                          _busy ||
+                                              _adding ||
+                                              _sharedLinks.isEmpty
+                                          ? null
+                                          : () => setState(() {
+                                              _selecting = !_selecting;
+                                              if (!_selecting) {
+                                                _selected.clear();
+                                              }
+                                            }),
+                                      icon: Icon(
+                                        _selecting
+                                            ? Icons.check_box_outlined
+                                            : Icons.checklist_rounded,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    for (final filter in [
+                                      'All',
+                                      'Photos',
+                                      'Videos',
+                                    ])
+                                      ChoiceChip(
+                                        label: Text(filter),
+                                        selected:
+                                            (_filter ?? _preferences.filter) ==
+                                            filter,
+                                        showCheckmark: false,
+                                        selectedColor: theme
+                                            .colorScheme
+                                            .secondaryContainer,
+                                        onSelected: (_) =>
+                                            setState(() => _filter = filter),
+                                      ),
+                                  ],
+                                ),
+                                if (_selecting) _selectionBar(visible),
+                                const SizedBox(height: 12),
+                                const Divider(height: 1),
+                              ],
                             ],
                           ),
                         ),
-                      )
-                    else
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                        sliver:
-                            constraints.maxWidth >= 820 &&
-                                MediaQuery.textScalerOf(context).scale(16) <= 16
-                            ? SliverGrid.builder(
-                                gridDelegate:
-                                    const SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: 2,
-                                      mainAxisExtent: 132,
-                                      crossAxisSpacing: 24,
-                                      mainAxisSpacing: 12,
-                                    ),
-                                itemCount: visible.length,
-                                itemBuilder: (_, index) =>
-                                    _downloadRow(visible[index]),
-                              )
-                            : SliverList.builder(
-                                itemCount: visible.length,
-                                itemBuilder: (_, index) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 20),
-                                  child: _downloadRow(visible[index]),
-                                ),
-                              ),
                       ),
-                  ],
+                      if (_inboxUnavailable ||
+                          _sharedLinks.isEmpty ||
+                          (showMedia && visible.isEmpty))
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  _inboxUnavailable
+                                      ? Icons.cloud_off_outlined
+                                      : Icons.download_outlined,
+                                  size: 36,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _inboxUnavailable
+                                      ? 'Downloads are unavailable.'
+                                      : _sharedLinks.isEmpty
+                                      ? 'No downloads yet'
+                                      : 'No matching downloads',
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _inboxUnavailable
+                                      ? 'Refresh to try loading your library again.'
+                                      : _sharedLinks.isEmpty
+                                      ? 'Paste a supported link above, or share one from another app to ClipShare.'
+                                      : 'Try another search or change the media filter.',
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 12),
+                                TextButton(
+                                  onPressed: _inboxUnavailable
+                                      ? _reload
+                                      : _sharedLinks.isEmpty
+                                      ? _showHelp
+                                      : () => setState(() {
+                                          _search.clear();
+                                          _folder = null;
+                                          _filter = 'All';
+                                        }),
+                                  child: Text(
+                                    _inboxUnavailable
+                                        ? 'Try again'
+                                        : _sharedLinks.isEmpty
+                                        ? 'How ClipShare works'
+                                        : 'Clear filters',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      else if (showMedia)
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                          sliver:
+                              constraints.maxWidth >= 820 &&
+                                  MediaQuery.textScalerOf(context).scale(16) <=
+                                      16
+                              ? SliverGrid.builder(
+                                  gridDelegate:
+                                      const SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: 2,
+                                        mainAxisExtent: 132,
+                                        crossAxisSpacing: 24,
+                                        mainAxisSpacing: 12,
+                                      ),
+                                  itemCount: visible.length,
+                                  itemBuilder: (_, index) =>
+                                      _downloadRow(visible[index]),
+                                )
+                              : SliverList.builder(
+                                  itemCount: visible.length,
+                                  itemBuilder: (_, index) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 20),
+                                    child: _downloadRow(visible[index]),
+                                  ),
+                                ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),

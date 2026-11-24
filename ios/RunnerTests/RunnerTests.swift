@@ -14,6 +14,40 @@ final class RunnerTests: XCTestCase {
     SharedLinks.testDirectory = nil
   }
 
+  #if STORE_BETA
+  func testStoreBetaAcceptsOnlyDirectMedia() throws {
+    XCTAssertEqual(SharedLinks.appGroup, "group.com.adesmith001.clipshare.beta")
+    for text in ["https://x.com/user/status/123", "https://www.instagram.com/reel/abc/", "https://pin.it/abc", "https://www.youtube.com/watch?v=dQw4w9WgXc", "https://vm.tiktok.com/ZExample/"] {
+      XCTAssertNil(SharedLinks.canonicalSource(URL(string: text)!))
+      XCTAssertThrowsError(try SharedLinks.enqueuePending(URL(string: text)!))
+    }
+    XCTAssertNotNil(SharedLinks.canonicalSource(URL(string: "https://example.com/own-video.mp4")!))
+    XCTAssertNotNil(SharedLinks.canonicalSource(URL(string: "https://example.com/own-image.jpg")!))
+    BackgroundDownloads.testTaskStarter = { _ in }
+    XCTAssertTrue(try BackgroundDownloads.start(URL(string: "https://example.com/own-video.mp4")!, inApp: true))
+    XCTAssertEqual(try SharedLinks.entries().count, 1)
+  }
+  #else
+  func testTikTokShortSharesAndExtensionlessVideoDownloads() throws {
+    let source = URL(string: "https://www.tiktok.com/@creator/video/6742501081818877190?tracking=first")!
+    let alias = URL(string: "https://vm.tiktok.com/ZExample/")!
+    let media = URL(string: "https://v16.tiktokcdn-us.com/video/clip/?signature=example")!
+    XCTAssertEqual(SharedLinks.canonicalSource(source)?.absoluteString, "https://www.tiktok.com/@_/video/6742501081818877190")
+    XCTAssertNotNil(SharedLinks.canonicalSource(alias))
+    XCTAssertNotNil(SharedLinks.canonicalSource(URL(string: "https://www.tiktok.com/t/ZExample/")!))
+    XCTAssertNil(SharedLinks.canonicalSource(URL(string: "https://www.tiktok.com/@creator/photo/123")!))
+    XCTAssertNil(SharedLinks.canonicalSource(URL(string: "https://vm.tiktok.com.evil.test/ZExample/")!))
+    XCTAssertTrue(SharedLinks.isResolvedVideo(media))
+    XCTAssertFalse(SharedLinks.isResolvedVideo(URL(string: "https://v16.tiktokcdn-us.com.evil.test/video/clip/")!))
+    XCTAssertTrue(try SharedLinks.enqueuePending(alias))
+    let pending = try XCTUnwrap(SharedLinks.entries().first)
+    BackgroundDownloads.testTaskStarter = { _ in }
+    XCTAssertTrue(try BackgroundDownloads.start(media, inApp: true, source: source, replacingID: pending.id, sourceAlias: alias))
+    XCTAssertEqual(try SharedLinks.entries().count, 1)
+    XCTAssertFalse(try SharedLinks.enqueuePending(alias))
+    XCTAssertFalse(try SharedLinks.enqueuePending(URL(string: "https://www.tiktok.com/@another/video/6742501081818877190")!))
+  }
+
   func testPendingCanonicalDedupeAndUnsupportedIntake() throws {
     XCTAssertTrue(try SharedLinks.enqueuePending(URL(string: "https://twitter.com/person/status/123?s=20")!))
     XCTAssertFalse(try SharedLinks.enqueuePending(URL(string: "https://x.com/person/status/123")!))
@@ -177,4 +211,5 @@ final class RunnerTests: XCTestCase {
       XCTAssertEqual(try SharedLinks.entries().count, count)
     }
   }
+  #endif
 }
