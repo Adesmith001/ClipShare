@@ -14,20 +14,31 @@ final class RunnerTests: XCTestCase {
     SharedLinks.testDirectory = nil
   }
 
-  #if STORE_BETA
-  func testStoreBetaAcceptsOnlyDirectMedia() throws {
+  func testDistributionAppGroup() {
+    #if STORE_BETA
     XCTAssertEqual(SharedLinks.appGroup, "group.com.adesmith001.clipshare.beta")
-    for text in ["https://x.com/user/status/123", "https://www.instagram.com/reel/abc/", "https://pin.it/abc", "https://www.youtube.com/watch?v=dQw4w9WgXc", "https://vm.tiktok.com/ZExample/"] {
-      XCTAssertNil(SharedLinks.canonicalSource(URL(string: text)!))
-      XCTAssertThrowsError(try SharedLinks.enqueuePending(URL(string: text)!))
-    }
-    XCTAssertNotNil(SharedLinks.canonicalSource(URL(string: "https://example.com/own-video.mp4")!))
-    XCTAssertNotNil(SharedLinks.canonicalSource(URL(string: "https://example.com/own-image.jpg")!))
-    BackgroundDownloads.testTaskStarter = { _ in }
-    XCTAssertTrue(try BackgroundDownloads.start(URL(string: "https://example.com/own-video.mp4")!, inApp: true))
-    XCTAssertEqual(try SharedLinks.entries().count, 1)
+    #else
+    XCTAssertEqual(SharedLinks.appGroup, "group.com.adesmith001.clipshare")
+    #endif
   }
-  #else
+
+  func testAllDistributionVariantsAcceptSocialAndDirectMedia() throws {
+    for text in [
+      "https://x.com/person/status/123",
+      "https://www.instagram.com/reel/test/",
+      "https://pin.it/abc",
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "https://vm.tiktok.com/ZExample/",
+      "https://example.com/own-video.mp4",
+      "https://example.com/own-photo.jpg",
+    ] {
+      let url = URL(string: text)!
+      XCTAssertNotNil(SharedLinks.canonicalSource(url), text)
+      XCTAssertTrue(try SharedLinks.enqueuePending(url), text)
+    }
+    XCTAssertEqual(try SharedLinks.entries().count, 7)
+  }
+
   func testTikTokShortSharesAndExtensionlessVideoDownloads() throws {
     let source = URL(string: "https://www.tiktok.com/@creator/video/6742501081818877190?tracking=first")!
     let alias = URL(string: "https://vm.tiktok.com/ZExample/")!
@@ -211,5 +222,4 @@ final class RunnerTests: XCTestCase {
       XCTAssertEqual(try SharedLinks.entries().count, count)
     }
   }
-  #endif
 }

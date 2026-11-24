@@ -79,7 +79,7 @@ class AndroidDownloadsTest : AndroidTestCase() {
             "https://x.com/user/status/123", "https://x.com/i/web/status/123",
             "https://www.instagram.com/p/abc_123/", "https://www.pinterest.com/pin/123/",
             "https://pin.it/abc", "https://www.instagram.com/reel/abc_123/",
-            "https://youtu.be/dQw4w9WgXc", "https://www.youtube.com/watch?v=dQw4w9WgXc"
+            "https://youtu.be/dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
         ).forEach { assertTrue(it, AndroidDownloads.socialLink(Uri.parse(it))) }
         listOf(
             "https://x.com.evil.test/user/status/123", "https://pinterest.com.evil.test/pin/123/",

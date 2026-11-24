@@ -35,7 +35,6 @@ internal class AndroidDownloads(
         }
 
         fun socialLink(url: Uri): Boolean {
-            if (BuildConfig.STORE_BETA) return false
             if (!url.scheme.equals("https", true) || url.host.isNullOrEmpty() || url.userInfo != null) return false
             if (tikTokLink(url)) return true
             val host = url.host!!.lowercase()

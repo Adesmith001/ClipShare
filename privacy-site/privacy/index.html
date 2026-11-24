@@ -33,7 +33,7 @@
   </header>
   <main>
     <h2>Who this policy covers</h2>
-    <p>Toluwani Somade develops ClipShare: Media Library (also displayed as ClipShare Beta). This policy covers the store beta for Android and iOS: a personal media library that saves direct HTTPS video and image links. The Android store beta uses package name <code>com.adesmith001.clipshare.beta</code>. This beta does not include social-post resolution or social-account sign-in.</p>
+    <p>Toluwani Somade develops ClipShare: Media Library (also displayed as ClipShare Beta). This policy covers ClipShare for Android and iOS, a personal media library that saves direct HTTPS media links and resolves supported social-post links. Social-link support is available in version 0.2.2 (build 11) and later; version 0.2.1 (build 10) of the store beta supports direct media links only. The Android store beta uses package name <code>com.adesmith001.clipshare.beta</code>. Social sources include public Instagram, X, YouTube, Pinterest, and TikTok posts, subject to provider availability and access restrictions.</p>
 
     <h2>Information handled on your device</h2>
     <p>ClipShare processes the links you paste or explicitly share to the app so it can download the media you request. It stores downloaded photos and videos, source links, available titles and thumbnails, download status and error codes, and library preferences on your device. This information supports playback, search, sorting, download recovery, and export.</p>
@@ -41,7 +41,10 @@
 
     <h2>Network requests and media hosts</h2>
     <p>When you request a download, your device connects to the media URL and any hosts used to deliver or redirect that request. Those hosts receive the requested URL, your IP address, and standard connection information needed to serve the file. A URL may itself contain identifying information or access tokens; only submit links you intend to use for a download.</p>
-    <p>Media is downloaded to your device, without passing through a ClipShare-operated server. The media host's privacy policy governs its handling and retention of requests. The store beta does not send links to a third-party social-post resolver.</p>
+    <p>Media is downloaded to your device, without passing through a ClipShare-operated server. The media host's privacy policy governs its handling and retention of requests. For TikTok video resolution, ClipShare sends the public post link, with tracking parameters removed, to TikWM (tikwm.com). TikWM receives the link and standard network request information, including your IP address. ClipShare does not send passwords or social-account sessions to TikWM. Other supported social-post resolution connects from your device to the relevant platform and its media hosts. These providers handle requests according to their own privacy policies and retention practices.</p>
+
+    <h2>Optional Instagram sign-in on iOS</h2>
+    <p>When you share an Instagram link to ClipShare on iOS, you may choose to sign in on Instagram's page inside the share extension. Credentials are submitted to Instagram, not to a ClipShare-operated server. The website session and cookies remain in the extension's on-device WebKit store. ClipShare reads page-provided media information to fulfil your requested download. Choose Disconnect Instagram in the share sheet to clear Instagram website data. Pasting in the main app does not use this session; Android's resolver accesses public posts without a signed-in session.</p>
 
     <h2>Permissions and exports</h2>
     <p>ClipShare uses internet access for requested downloads. When you choose to save or export an item, it uses the platform's Photos, Gallery, Files, or sharing features and requests permission where required. An export or share sends the selected item to the location or app you choose; that service's own privacy practices apply. Denying Photos access or cancelling an export leaves the copy in ClipShare available.</p>
@@ -65,7 +68,7 @@
     <p>ClipShare is not directed to children under 13, and we do not knowingly collect their personal information through support. If you believe a child has provided personal information to us, contact us so we can address it.</p>
 
     <h2>Changes to this policy</h2>
-    <p>We will update this page and its revision date when data practices change. A release that adds social-platform features or other data handling will require an updated policy describing those features.</p>
+    <p>We will update this page and its revision date when data practices change. This update describes social-link resolution introduced in version 0.2.2 (build 11), including TikWM requests and optional Instagram sign-in in the iOS share extension.</p>
 
     <h2>Contact and privacy requests</h2>
     <p>For questions, support, or requests about personal information you have sent to us, contact Toluwani Somade at <a href="mailto:somadetoluwani@gmail.com">somadetoluwani@gmail.com</a>. We do not have remote access to your device's local library.</p>

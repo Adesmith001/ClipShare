@@ -10,7 +10,6 @@ import 'library.dart';
 import 'library_help.dart';
 import 'settings.dart';
 import 'brand.dart';
-import 'build_mode.dart';
 
 const plum = Color(0xFF302435);
 const apricot = Color(0xFFF5C5A5);
@@ -207,11 +206,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       return;
     }
     if (!isDirectVideo(url) && !isDirectImage(url)) {
-      _showMessage(
-        storeBeta
-            ? 'Paste a direct HTTPS MP4, JPEG, PNG, or WebP file link.'
-            : 'Paste a supported post link or a direct media link.',
-      );
+      _showMessage('Paste a supported post link or a direct media link.');
       return;
     }
     setState(() => _adding = true);
@@ -827,9 +822,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               enabled: !_adding && !_busy,
               decoration: const InputDecoration(
                 labelText: 'Media link',
-                hintText: storeBeta
-                    ? 'Paste a direct file link'
-                    : 'Paste a post or file link',
+                hintText: 'Paste a post or file link',
                 prefixIcon: Icon(Icons.link_rounded),
               ),
               keyboardType: TextInputType.url,
@@ -867,13 +860,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   );
   Widget _platformFolders(double width) {
     final platforms =
-        (storeBeta
-                ? ['Videos', 'Photos']
-                : ['Instagram', 'X', 'YouTube', 'TikTok', 'Pinterest', 'Other'])
-            .where(
-              (platform) =>
-                  _sharedLinks.any((entry) => mediaPlatform(entry) == platform),
-            );
+        ['Instagram', 'X', 'YouTube', 'TikTok', 'Pinterest', 'Other'].where(
+          (platform) =>
+              _sharedLinks.any((entry) => mediaPlatform(entry) == platform),
+        );
     final columns = width >= 650 ? 4 : 2;
     final tileWidth = (width - (columns - 1) * 12) / columns;
     return Wrap(

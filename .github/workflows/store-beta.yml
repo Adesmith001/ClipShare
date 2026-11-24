@@ -19,7 +19,7 @@ jobs:
           dart format --output=none --set-exit-if-changed lib test
           flutter analyze --no-pub
           flutter test --no-pub
-          flutter test --no-pub --dart-define=STORE_BETA=true test/store_beta_test.dart
+          flutter test --no-pub --dart-define=STORE_BETA=true
       - name: Test native store-beta intake
         run: |
           flutter precache --ios

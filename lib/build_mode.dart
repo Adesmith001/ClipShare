@@ -1,2 +1,2 @@
-/// Set only by the separate store-beta build; personal builds keep all sources.
+/// Distribution identity flag only. Social-link support is shared by all builds.
 const storeBeta = bool.fromEnvironment('STORE_BETA');

@@ -1,92 +1,90 @@
-import 'dart:io';
-
 import 'package:clipshare/library.dart';
 import 'package:clipshare/main.dart';
 import 'package:clipshare/social_video.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
-  const enabled = bool.fromEnvironment('STORE_BETA');
-  group('direct-media store beta', skip: !enabled, () {
-    test(
-      'rejects all social posts before opening a network connection',
-      () async {
-        for (final link in [
-          'https://www.youtube.com/watch?v=dQw4w9WgXc',
-          'https://x.com/person/status/123',
-          'https://www.instagram.com/reel/test/',
-          'https://pin.it/abc',
-          'https://vm.tiktok.com/ZExample/',
-        ]) {
-          final url = Uri.parse(link);
-          expect(isSocialVideo(url), isFalse, reason: link);
-          expect(extractMediaLink(link), isNull);
-          await expectLater(
-            HttpOverrides.runZoned(
-              () => resolveSocialVideo(url),
-              createHttpClient: (_) =>
-                  throw StateError('Social resolution attempted networking'),
-            ),
-            throwsFormatException,
-          );
-        }
-        expect(
-          extractMediaLink('https://example.com/own-video.mp4'),
-          isNotNull,
-        );
-        expect(
-          extractMediaLink('https://example.com/own-photo.jpg'),
-          isNotNull,
-        );
-        expect(
-          mediaPlatform({'url': 'https://example.com/own-video.mp4'}),
-          'Videos',
-        );
-        expect(
-          mediaPlatform({'url': 'https://example.com/own-photo.jpg'}),
-          'Photos',
-        );
-      },
-    );
+  test('store and personal builds accept the same social and direct links', () {
+    for (final link in [
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      'https://x.com/person/status/123',
+      'https://www.instagram.com/reel/test/',
+      'https://pin.it/abc',
+      'https://vm.tiktok.com/ZExample/',
+    ]) {
+      expect(isSocialVideo(Uri.parse(link)), isTrue, reason: link);
+      expect(extractMediaLink('Shared with you: $link'), Uri.parse(link));
+    }
+    for (final link in [
+      'https://example.com/own-video.mp4',
+      'https://example.com/own-photo.jpg',
+    ]) {
+      expect(extractMediaLink(link), Uri.parse(link));
+    }
+    for (final link in [
+      'http://x.com/person/status/123',
+      'https://x.com.evil.test/person/status/123',
+      'https://name:secret@x.com/person/status/123',
+    ]) {
+      expect(extractMediaLink(link), isNull);
+    }
+    expect(mediaPlatform({'url': 'https://x.com/person/status/123'}), 'X');
+  });
 
-    testWidgets('organizes direct media without advertising social providers', (
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    testWidgets('pasted social link reaches the download queue on $platform', (
       tester,
     ) async {
+      debugDefaultTargetPlatformOverride = platform;
       const channel = MethodChannel('clipshare/shared_links');
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
-        call,
-      ) async {
-        if (call.method == 'list') {
-          return [
-            {
-              'id': 'v',
-              'url': 'https://example.com/own-video.mp4',
-              'state': 'saved',
-            },
-            {
-              'id': 'p',
-              'url': 'https://example.com/own-photo.jpg',
-              'state': 'saved',
-              'isImage': true,
-            },
-          ];
+      final messenger = tester.binding.defaultBinaryMessenger;
+      Map<Object?, Object?>? queued;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'addResolved') {
+          queued = Map<Object?, Object?>.from(call.arguments as Map);
+          return true;
         }
+        if (call.method == 'list') return <Object>[];
         return null;
       });
-      addTearDown(
-        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-          channel,
-          null,
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(channel, null);
+        debugDefaultTargetPlatformOverride = null;
+      });
+      const source = 'https://x.com/person/status/123';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DownloadsScreen(
+            resolveMedia: (url) async {
+              expect(url.toString(), source);
+              return (
+                source: url,
+                items: [
+                  (
+                    url: Uri.parse('https://example.com/video.mp4'),
+                    slot: 0,
+                    position: null,
+                  ),
+                ],
+                title: 'Test video',
+              );
+            },
+          ),
         ),
       );
-      await tester.pumpWidget(const ClipShareApp());
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('platform:Videos')), findsOneWidget);
-      expect(find.byKey(const Key('platform:Photos')), findsOneWidget);
-      expect(find.text('TikTok'), findsNothing);
-      expect(find.text('Instagram'), findsNothing);
+      await tester.enterText(find.byKey(const Key('mediaLink')), source);
+      await tester.tap(find.byTooltip('Add link'));
+      await tester.pumpAndSettle();
+      expect(queued?['source'], source);
+      expect(queued?['media'], 'https://example.com/video.mp4');
+      expect(
+        find.text('Paste a direct HTTPS MP4, JPEG, PNG, or WebP file link.'),
+        findsNothing,
+      );
     });
-  });
+  }
 }

@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'build_mode.dart';
-
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 bool isHttpsLink(Uri? url) =>
@@ -139,7 +137,6 @@ bool isTikTokMedia(Uri? url) {
 }
 
 bool isSocialVideo(Uri? url) =>
-    !storeBeta &&
     isHttpsLink(url) &&
     (_pinId(url!) != null ||
         (url.host == 'pin.it' && url.pathSegments.length == 1) ||

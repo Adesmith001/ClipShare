@@ -1,6 +1,6 @@
 # ClipShare
 
-ClipShare is a personal downloader for media shared from social apps. Version `0.2.1+10` includes automatic platform folders, search, saved appearance and library settings, selection and batch actions, queue recovery, and beta diagnostics.
+ClipShare is a personal downloader for media shared from social apps. Version `0.2.2+11` includes automatic platform folders, search, saved appearance and library settings, selection and batch actions, queue recovery, and beta diagnostics.
 
 ## Run the app
 
@@ -78,3 +78,11 @@ flutter analyze --no-pub
 flutter test --no-pub
 flutter build apk --debug --no-pub
 ```
+
+## Store update 0.2.2 (11)
+
+Store builds now accept the same supported social links as personal builds. `STORE_BETA=true` selects the existing store package/bundle IDs, App Group, display name, and signing keys; it must not restrict link resolution. Keep using it for upgrades to the existing store listings.
+
+Build Android with `flutter build appbundle --release --dart-define=STORE_BETA=true`. The signed bundle is `build/app/outputs/bundle/release/app-release.aab`. The private iOS repository's **Store beta build** workflow produces the signed IPA for TestFlight. Existing installed version 0.2.1 (10) needs an app update to receive this fix.
+
+Update the store description/release notes to mention supported social links. Version 0.2.2's privacy policy at `/privacy` discloses TikWM network requests and optional Instagram sign-in on iOS. Review the store Data safety/App Privacy answers against these practices when submitting the update.

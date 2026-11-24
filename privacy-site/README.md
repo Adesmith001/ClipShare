@@ -18,7 +18,7 @@ Run `python -m http.server 8765 --directory privacy-site` from the repository ro
 
 ## Policy scope
 
-The policy follows the current `STORE_BETA` direct-media build and the support address already used in the app. Update it before enabling social resolvers or sign-in in a store release. Review support retention and children's privacy statements against actual operating practices before publishing.
+The policy describes social resolution in 0.2.2+11 and the direct-media-only behavior of earlier store builds. It includes TikWM requests and optional iOS Instagram sign-in. Review support retention and children's privacy statements against actual operating practices before publishing.
 
 ## Image credits
 
