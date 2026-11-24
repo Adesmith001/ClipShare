@@ -1,19 +1,25 @@
-# ClipShare privacy page
+# ClipShare website
 
-Static privacy policy for the direct-link store beta. No JavaScript, external fonts, dependencies, or build step.
+Static landing page and privacy policy. No build step or dependencies. Self-hosted photos are illustrative media from Unsplash, not app screenshots or user downloads.
 
 ## Deploy from GitHub to Vercel
 
-1. Commit and push `privacy-site/` to `Adesmith001/ClipShare`.
-2. In Vercel, add a new project and import that repository.
-3. Set **Root Directory** to `privacy-site` and **Framework Preset** to **Other**.
-4. Leave Build Command and Install Command empty (override detected commands if necessary). Use `.` as the Output Directory.
-5. Deploy. Ensure the production deployment is public and does not require Vercel authentication.
-6. Open the production URL in a private browser window. The policy is served at `/`, `/privacy`, and `/privacy-policy`.
-7. Paste your production URL followed by `/privacy` into Play Console's Privacy Policy field and the App Store privacy-policy field.
+1. Import `Adesmith001/ClipShare` and select the `codex/store-beta` branch as the production branch.
+2. Set **Root Directory** to `privacy-site`, **Framework Preset** to **Other**, and **Output Directory** to `.`.
+3. Leave Build Command and Install Command empty. Deploy publicly without authentication protection on production.
+4. The landing page is at `/`. The privacy policy is at `/privacy` (with `/privacy-policy` as an alias).
+5. Use `https://YOUR-PRODUCTION-DOMAIN/privacy` in Play Console and App Store Connect, and add the same link inside the mobile app before submission.
 
-Add a link to that same production URL inside the mobile app before submitting the next store build. The deployed domain is not known until you create the Vercel project; do not put an invented domain into the app.
+The contact button opens an email requesting beta access. It does not register testers or collect emails. Replace it with verified store links once public distribution is active. The library filters and FAQ are working browser interactions; the phone is an illustrative preview, not a live app.
 
-## Scope and maintenance
+## Local preview
 
-The text follows the current `STORE_BETA` direct-media build and the support address already shown in the app. It does not cover the personal build's social resolvers and sign-in features. Update the policy before enabling those features in a store release. Review support-retention and children's-privacy statements against your actual operating practices before publishing. Vercel may process website access logs; consult its current privacy documentation and your project settings for hosting retention controls.
+Run `python -m http.server 8765 --directory privacy-site` from the repository root, then open `http://localhost:8765`. Python serves the physical `/privacy/` page; Vercel additionally handles the configured `/privacy-policy` alias and response security headers.
+
+## Policy scope
+
+The policy follows the current `STORE_BETA` direct-media build and the support address already used in the app. Update it before enabling social resolvers or sign-in in a store release. Review support retention and children's privacy statements against actual operating practices before publishing.
+
+## Image credits
+
+Illustrative landscape photos: Unsplash image IDs `photo-1470770841072-f978cf4d019e`, `photo-1464822759023-fed622ff2c3b`, and `photo-1441974231531-c6227db76b6e`. Files are served locally without visitor requests to Unsplash. App icon: existing ClipShare project asset.
