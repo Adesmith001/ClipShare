@@ -2,7 +2,11 @@ import Darwin
 import Foundation
 
 enum SharedLinks {
+  #if STORE_BETA
+  static let appGroup = "group.com.adesmith001.clipshare.beta"
+  #else
   static let appGroup = "group.com.adesmith001.clipshare"
+  #endif
 
   struct Entry: Codable {
     enum State: String, Codable {
@@ -120,6 +124,12 @@ enum SharedLinks {
   }
 
   static func canonicalSource(_ url: URL) -> URL? {
+    #if STORE_BETA
+    guard isDirectVideo(url) || imageExtension(url) != nil else { return nil }
+    var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    parts?.fragment = nil
+    return parts?.url
+    #else
     guard webURL(url) != nil, let host = url.host?.lowercased() else { return nil }
     if isTikTokLink(url) {
       if let id = tikTokVideoID(url) { return URL(string: "https://www.tiktok.com/@_/video/\(id)") }
@@ -168,6 +178,7 @@ enum SharedLinks {
       return parts?.url
     }
     return nil
+    #endif
   }
 
   static func enqueuePending(_ url: URL) throws -> Bool {

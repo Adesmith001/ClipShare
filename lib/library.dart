@@ -1,4 +1,5 @@
 import 'social_video.dart';
+import 'build_mode.dart';
 
 typedef DownloadEntry = Map<Object?, Object?>;
 
@@ -22,6 +23,7 @@ bool mediaIsImage(DownloadEntry entry) =>
     isDirectImage(Uri.tryParse(entry['url'] as String? ?? ''));
 
 String mediaPlatform(DownloadEntry entry) {
+  if (storeBeta) return mediaIsImage(entry) ? 'Photos' : 'Videos';
   final source = mediaSource(entry);
   return const {
         'Instagram',

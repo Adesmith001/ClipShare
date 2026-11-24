@@ -114,7 +114,11 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
         }
       }
     }
+    #if STORE_BETA
+    message.text = "Share a direct HTTPS MP4, JPEG, PNG, or WebP file link."
+    #else
     message.text = "Share a supported Instagram, X, Pinterest, YouTube, TikTok or direct media link."
+    #endif
   }
 
   private nonisolated static func extractURL(_ item: (any NSSecureCoding)?) -> URL? {

@@ -3,6 +3,31 @@ import XCTest
 @testable import Runner
 
 final class RunnerTests: XCTestCase {
+  override func setUpWithError() throws {
+    SharedLinks.testDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: SharedLinks.testDirectory!, withIntermediateDirectories: true)
+  }
+
+  override func tearDownWithError() throws {
+    BackgroundDownloads.testTaskStarter = nil
+    if let directory = SharedLinks.testDirectory { try FileManager.default.removeItem(at: directory) }
+    SharedLinks.testDirectory = nil
+  }
+
+  #if STORE_BETA
+  func testStoreBetaAcceptsOnlyDirectMedia() throws {
+    XCTAssertEqual(SharedLinks.appGroup, "group.com.adesmith001.clipshare.beta")
+    for text in ["https://x.com/user/status/123", "https://www.instagram.com/reel/abc/", "https://pin.it/abc", "https://www.youtube.com/watch?v=dQw4w9WgXc", "https://vm.tiktok.com/ZExample/"] {
+      XCTAssertNil(SharedLinks.canonicalSource(URL(string: text)!))
+      XCTAssertThrowsError(try SharedLinks.enqueuePending(URL(string: text)!))
+    }
+    XCTAssertNotNil(SharedLinks.canonicalSource(URL(string: "https://example.com/own-video.mp4")!))
+    XCTAssertNotNil(SharedLinks.canonicalSource(URL(string: "https://example.com/own-image.jpg")!))
+    BackgroundDownloads.testTaskStarter = { _ in }
+    XCTAssertTrue(try BackgroundDownloads.start(URL(string: "https://example.com/own-video.mp4")!, inApp: true))
+    XCTAssertEqual(try SharedLinks.entries().count, 1)
+  }
+  #else
   func testTikTokShortSharesAndExtensionlessVideoDownloads() throws {
     let source = URL(string: "https://www.tiktok.com/@creator/video/6742501081818877190?tracking=first")!
     let alias = URL(string: "https://vm.tiktok.com/ZExample/")!
@@ -21,17 +46,6 @@ final class RunnerTests: XCTestCase {
     XCTAssertEqual(try SharedLinks.entries().count, 1)
     XCTAssertFalse(try SharedLinks.enqueuePending(alias))
     XCTAssertFalse(try SharedLinks.enqueuePending(URL(string: "https://www.tiktok.com/@another/video/6742501081818877190")!))
-  }
-
-  override func setUpWithError() throws {
-    SharedLinks.testDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    try FileManager.default.createDirectory(at: SharedLinks.testDirectory!, withIntermediateDirectories: true)
-  }
-
-  override func tearDownWithError() throws {
-    BackgroundDownloads.testTaskStarter = nil
-    if let directory = SharedLinks.testDirectory { try FileManager.default.removeItem(at: directory) }
-    SharedLinks.testDirectory = nil
   }
 
   func testPendingCanonicalDedupeAndUnsupportedIntake() throws {
@@ -197,4 +211,5 @@ final class RunnerTests: XCTestCase {
       XCTAssertEqual(try SharedLinks.entries().count, count)
     }
   }
+  #endif
 }

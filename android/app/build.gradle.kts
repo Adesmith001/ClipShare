@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.util.Base64
 
 plugins {
     id("com.android.application")
@@ -6,9 +7,13 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val storeBeta = (project.findProperty("dart-defines") as? String).orEmpty().split(",").any {
+    runCatching { String(Base64.getDecoder().decode(it)) == "STORE_BETA=true" }.getOrDefault(false)
+}
+
 // Local properties take precedence; CI may provide the same values through env.
 val releaseKeys = Properties().apply {
-    val propertiesFile = rootProject.file("key.properties")
+    val propertiesFile = rootProject.file(if (storeBeta) "key.beta.properties" else "key.properties")
     if (propertiesFile.isFile) propertiesFile.inputStream().use { load(it) }
 }
 fun releaseKey(property: String, environment: String): String? =
@@ -27,8 +32,10 @@ gradle.taskGraph.whenReady {
     }
 }
 
+
 android {
     namespace = "com.adesmith001.clipshare"
+    buildFeatures { buildConfig = true }
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -39,7 +46,9 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.adesmith001.clipshare"
+        applicationId = if (storeBeta) "com.adesmith001.clipshare.beta" else "com.adesmith001.clipshare"
+        buildConfigField("boolean", "STORE_BETA", storeBeta.toString())
+        manifestPlaceholders["appLabel"] = if (storeBeta) "ClipShare Beta" else "ClipShare"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

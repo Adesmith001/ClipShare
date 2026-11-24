@@ -51,3 +51,6 @@ app.*.map.json
 android/key.properties
 *.jks
 *.keystore
+
+# Separate store-beta upload signing
+android/key.beta.properties
