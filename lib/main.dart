@@ -10,7 +10,6 @@ import 'library.dart';
 import 'library_help.dart';
 import 'settings.dart';
 import 'brand.dart';
-import 'tutorial.dart';
 
 const plum = Color(0xFF302435);
 const apricot = Color(0xFFF5C5A5);
@@ -116,6 +115,77 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   bool _inboxUnavailable = false;
   bool? _initialLibraryEmpty;
   bool _tutorialOpen = false;
+  int _tutorialStep = 0;
+  String? _tutorialSource;
+  final _tutorialKnownIds = <Object?>{};
+
+  DownloadEntry? get _tutorialEntry {
+    for (final entry in _sharedLinks) {
+      if (_tutorialSource != null &&
+          (entry['url'] == _tutorialSource ||
+              entry['sharedSource'] == _tutorialSource)) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  void _tutorialInputChanged() {
+    if (!_tutorialOpen || _tutorialStep < 2 || _tutorialStep > 3) return;
+    final url = extractMediaLink(_link.text) ?? Uri.tryParse(_link.text.trim());
+    final valid =
+        isSocialVideo(url) || isDirectVideo(url) || isDirectImage(url);
+    setState(() {
+      _tutorialStep = valid ? 3 : 2;
+      if (valid) _tutorialSource = url.toString();
+    });
+  }
+
+  void _endTutorial() {
+    setState(() => _tutorialOpen = false);
+    _preferences.markTutorialSeen();
+  }
+
+  Widget _tutorialHint(String title, String text, {VoidCallback? next}) =>
+      Container(
+        key: const Key('tutorialHint'),
+        margin: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.secondaryContainer,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.primary,
+            width: 2,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              liveRegion: true,
+              header: true,
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(text),
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton(
+                  onPressed: _endTutorial,
+                  child: const Text('Skip tutorial'),
+                ),
+                if (next != null)
+                  FilledButton(onPressed: next, child: const Text('Next')),
+              ],
+            ),
+          ],
+        ),
+      );
   bool _adding = false;
   bool _busy = false;
   bool _selecting = false;
@@ -139,6 +209,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     _preferences = widget.preferences ?? AppPreferences();
     if (widget.preferences == null) _preferences.load();
     _preferences.addListener(_preferencesChanged);
+    _link.addListener(_tutorialInputChanged);
     _lifecycle = AppLifecycleListener(
       onResume: _reload,
       onInactive: () => _progressTimer?.cancel(),
@@ -180,6 +251,15 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           for (final group in grouped.values)
             ...(group..sort((a, b) => _position(a).compareTo(_position(b)))),
         ];
+        if (_tutorialOpen && _tutorialStep == 2) {
+          for (final entry in _sharedLinks) {
+            if (!_tutorialKnownIds.contains(entry['id'])) {
+              _tutorialSource = entry['url'] as String;
+              _tutorialStep = 4;
+              break;
+            }
+          }
+        }
         _initialLibraryEmpty ??= _sharedLinks.isEmpty;
         _inboxUnavailable = false;
         _selected.retainAll(_sharedLinks.map((entry) => entry['id'] as String));
@@ -204,6 +284,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
   Future<void> _addLink() async {
     if (_adding || _busy) return;
+    if (_tutorialOpen && _tutorialStep == 3) setState(() => _tutorialStep = 4);
     final text = extractMediaLink(_link.text)?.toString() ?? _link.text.trim();
     final url = Uri.tryParse(text);
     if (isSocialVideo(url)) {
@@ -225,7 +306,14 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     } on PlatformException catch (error) {
       _recordError(error.code);
     } finally {
-      if (mounted) setState(() => _adding = false);
+      if (mounted) {
+        setState(() {
+          _adding = false;
+          if (_tutorialOpen && _tutorialStep == 4 && _tutorialEntry == null) {
+            _tutorialStep = 3;
+          }
+        });
+      }
     }
   }
 
@@ -251,6 +339,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             )
           : await widget.resolveMedia(url);
       if (!mounted) return false;
+      if (_tutorialOpen && _tutorialStep == 4 && replacing == null) {
+        _tutorialSource = resolved.source.toString();
+      }
       final items = resolved.items.where(
         (item) => onlySlot == null || item.slot == onlySlot,
       );
@@ -352,7 +443,14 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     } on Exception {
       _recordError('network', quiet: quiet);
     } finally {
-      if (mounted) setState(() => _adding = false);
+      if (mounted) {
+        setState(() {
+          _adding = false;
+          if (_tutorialOpen && _tutorialStep == 4 && _tutorialEntry == null) {
+            _tutorialStep = 3;
+          }
+        });
+      }
     }
     return false;
   }
@@ -404,16 +502,22 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     });
   }
 
-  Future<void> _showTutorial() async {
+  void _showTutorial() {
     if (_tutorialOpen) return;
-    _tutorialOpen = true;
     FocusScope.of(context).unfocus();
-    await Navigator.of(
-      context,
-    ).push<void>(MaterialPageRoute(builder: (_) => const ClipShareTutorial()));
-    if (!mounted) return;
-    await _preferences.markTutorialSeen();
-    _tutorialOpen = false;
+    setState(() {
+      _tutorialOpen = true;
+      _tutorialStep = 0;
+      _tutorialSource = null;
+      _tutorialKnownIds.clear();
+      _tutorialKnownIds.addAll(_sharedLinks.map((entry) => entry['id']));
+      _folder = null;
+      _searching = false;
+      _search.clear();
+      _selecting = false;
+      _selected.clear();
+      _filter = 'All';
+    });
   }
 
   Future<void> _reload() => _refreshSharedLinks();
@@ -429,7 +533,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             ),
           ),
           onHelp: _showHelp,
-          onTutorial: _showTutorial,
+          onTutorial: () {
+            Navigator.of(context).pop();
+            _showTutorial();
+          },
         ),
       ),
     );
@@ -540,6 +647,11 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             done = await _channel.invokeMethod<bool>(method, id) == true;
           }
           if (done) {
+            if (_tutorialOpen &&
+                entry['id'] == _tutorialEntry?['id'] &&
+                ['export', 'saveToPhotos', 'exportToFiles'].contains(action)) {
+              setState(() => _tutorialStep = 6);
+            }
             completed++;
           } else if (attemptError != null) {
             failed++;
@@ -711,7 +823,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         ),
       ),
     );
-    return GestureDetector(
+    final row = GestureDetector(
       onLongPress: _busy || _adding
           ? null
           : () => setState(() {
@@ -839,6 +951,21 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         ],
       ),
     );
+    if (_tutorialOpen && _tutorialStep == 5 && id == _tutorialEntry?['id']) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _tutorialHint(
+            saved ? 'Step 4 - Save your file below' : 'Wait for Saved',
+            saved
+                ? 'Tap this item’s three-dot menu, then choose ${defaultTargetPlatform == TargetPlatform.iOS ? "Save to Photos or Save to Files" : "Save to Gallery"}. Allow access or choose a location if asked.'
+                : 'For Pending download, tap the download arrow on this item. If it fails, tap Retry download. When it says Saved, we will show you how to export it.',
+          ),
+          row,
+        ],
+      );
+    }
+    return row;
   }
 
   List<DownloadEntry> get _visible {
@@ -861,7 +988,16 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               key: const Key('mediaLink'),
               controller: _link,
               enabled: !_adding && !_busy,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
+                enabledBorder: _tutorialOpen && _tutorialStep <= 2
+                    ? OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: Theme.of(context).colorScheme.primary,
+                          width: 3,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      )
+                    : null,
                 labelText: 'Media link',
                 hintText: 'Paste a post or file link',
                 prefixIcon: Icon(Icons.link_rounded),
@@ -880,6 +1016,12 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               onPressed: _adding || _busy ? null : _addLink,
               icon: const Icon(Icons.add_rounded, size: 28),
               style: IconButton.styleFrom(
+                side: _tutorialOpen && _tutorialStep == 3
+                    ? BorderSide(
+                        color: Theme.of(context).colorScheme.secondary,
+                        width: 4,
+                      )
+                    : null,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
@@ -934,11 +1076,28 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       color: color.withValues(
         alpha: Theme.of(context).brightness == Brightness.dark ? 0.20 : 0.09,
       ),
-      borderRadius: BorderRadius.circular(20),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side:
+            _tutorialOpen &&
+                _tutorialStep == 4 &&
+                _tutorialEntry != null &&
+                mediaPlatform(_tutorialEntry!) == platform
+            ? BorderSide(color: scheme.primary, width: 3)
+            : BorderSide.none,
+      ),
       child: InkWell(
         key: Key('platform:$platform'),
         borderRadius: BorderRadius.circular(20),
-        onTap: () => setState(() => _folder = platform),
+        onTap: () => setState(() {
+          _folder = platform;
+          if (_tutorialOpen &&
+              _tutorialStep == 4 &&
+              _tutorialEntry != null &&
+              mediaPlatform(_tutorialEntry!) == platform) {
+            _tutorialStep = 5;
+          }
+        }),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -1147,6 +1306,38 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                 '${_sharedLinks.length} items · ${formatBytes(totalBytes)} on this device',
                                 style: theme.textTheme.bodySmall,
                               ),
+                              if (_tutorialOpen && _tutorialStep <= 4)
+                                _tutorialHint(
+                                  switch (_tutorialStep) {
+                                    0 => 'Step 1 - Paste your link here',
+                                    1 => 'Step 2 - Get a link from another app',
+                                    2 => 'Paste your link below',
+                                    3 => 'Tap the highlighted + button',
+                                    _ => 'Open the highlighted folder below',
+                                  },
+                                  switch (_tutorialStep) {
+                                    0 => 'The Media link field below is where you paste a copied link. Press and hold the field, then choose Paste.',
+                                    1 => 'Open Instagram, TikTok, YouTube, or X. Open a public post, tap Share, then Copy link. Return here and paste it below. You can also choose ClipShare from the Share menu in those apps.',
+                                    2 => 'Paste a supported link into Media link below. This guide will wait for you.',
+                                    3 => 'Your link is ready. Tap + beside Media link to add your download.',
+                                    _ =>
+                                      _tutorialEntry == null
+                                          ? 'Adding your link. If it fails, paste a fresh public link below and try again.'
+                                          : 'Tap ${mediaPlatform(_tutorialEntry!)} below to see your download.',
+                                  },
+                                  next: _tutorialStep < 2
+                                      ? () {
+                                          setState(() => _tutorialStep++);
+                                          _tutorialInputChanged();
+                                        }
+                                      : null,
+                                ),
+                              if (_tutorialOpen && _tutorialStep == 6)
+                                _tutorialHint(
+                                  'Your file has been saved',
+                                  'Replay this guide anytime from Settings.',
+                                  next: _endTutorial,
+                                ),
                               if (_hasNativeDownloads) ...[
                                 const SizedBox(height: 18),
                                 _linkInput(),

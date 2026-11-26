@@ -70,40 +70,89 @@ void main() {
       return null;
     });
     await open(tester);
-    expect(find.text('Copy and paste a link'), findsOneWidget);
+    expect(find.text('Step 1 - Paste your link here'), findsOneWidget);
+    expect(find.byKey(const Key('mediaLink')), findsOneWidget);
     await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
-    expect(find.text('Share from another app'), findsOneWidget);
-    await tester.tap(find.text('Back'));
+    expect(find.text('Step 2 - Get a link from another app'), findsOneWidget);
+    expect(find.textContaining('Pinterest'), findsNothing);
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
-    expect(find.text('Copy and paste a link'), findsOneWidget);
+    expect(find.text('Paste your link below'), findsOneWidget);
+    expect(find.text('Next'), findsNothing);
+    await tester.enterText(
+      find.byKey(const Key('mediaLink')),
+      'https://example.com/test.mp4',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Tap the highlighted + button'), findsOneWidget);
     await tester.tap(find.text('Skip tutorial'));
     await tester.pumpAndSettle();
     expect(saved['tutorialSeen'], 'true');
-    expect(find.byKey(const Key('mediaLink')), findsOneWidget);
-
     await tester.pumpWidget(const SizedBox());
     await open(tester);
-    expect(find.text('Copy and paste a link'), findsNothing);
+    expect(find.byKey(const Key('tutorialHint')), findsNothing);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    final replay = find.text('Replay tutorial');
-    await tester.scrollUntilVisible(replay, 240);
-    await tester.tap(replay);
+    await tester.scrollUntilVisible(find.text('Replay tutorial'), 240);
+    await tester.tap(find.text('Replay tutorial'));
     await tester.pumpAndSettle();
-    for (final title in [
-      'Share from another app',
-      'Check your download',
-      'Open and export saved media',
-      'Find and manage downloads',
-    ]) {
+    expect(find.text('Step 1 - Paste your link here'), findsOneWidget);
+  });
+
+  testWidgets('guide follows a real download through its folder and export', (
+    tester,
+  ) async {
+    var added = false;
+    var exported = false;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(downloads, (
+      call,
+    ) async {
+      if (call.method == 'list') {
+        return [
+          if (added)
+            {
+              'id': 'guide',
+              'url': 'https://example.com/tutorial.mp4',
+              'state': 'saved',
+              'canExport': true,
+            },
+        ];
+      }
+      if (call.method == 'add') {
+        added = true;
+        return true;
+      }
+      if (call.method == 'export') {
+        exported = true;
+        return true;
+      }
+      return null;
+    });
+    await open(tester);
+    for (var i = 0; i < 2; i++) {
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
-      expect(find.text(title), findsOneWidget);
     }
-    await tester.tap(find.text('Done'));
+    await tester.enterText(
+      find.byKey(const Key('mediaLink')),
+      'https://example.com/tutorial.mp4',
+    );
     await tester.pumpAndSettle();
-    expect(find.text('Settings'), findsOneWidget);
+    await tester.tap(find.byTooltip('Add link'));
+    await tester.pumpAndSettle();
+    expect(find.text('Open the highlighted folder below'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('platform:Other')));
+    await tester.tap(find.byKey(const Key('platform:Other')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Export video'));
+    expect(find.text('Step 4 - Save your file below'), findsOneWidget);
+    await tester.tap(find.byTooltip('Export video'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save to Gallery'));
+    await tester.pumpAndSettle();
+    expect(exported, isTrue);
+    expect(find.text('Your file has been saved'), findsOneWidget);
   });
 
   testWidgets(
