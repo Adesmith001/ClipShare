@@ -14,8 +14,15 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(preferences, (call) async {
       if (call.method == 'read') return saved;
-      saved = Map<String, String>.from(call.arguments as Map);
-      return true;
+      if (call.method == 'write') {
+        saved.addAll(Map<String, String>.from(call.arguments as Map));
+        return true;
+      }
+      if (call.method == 'markTutorialSeen') {
+        saved['tutorialSeen'] = 'true';
+        return true;
+      }
+      return null;
     });
     messenger.setMockMethodCallHandler(downloads, (call) async {
       if (call.method == 'list') {
@@ -52,6 +59,51 @@ void main() {
     messenger.setMockMethodCallHandler(downloads, null);
     messenger.setMockMethodCallHandler(preferences, null);
     debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('first launch offers the tutorial once and Settings replays it', (
+    tester,
+  ) async {
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(downloads, (call) async {
+      if (call.method == 'list') return <Object>[];
+      return null;
+    });
+    await open(tester);
+    expect(find.text('Copy and paste a link'), findsOneWidget);
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Share from another app'), findsOneWidget);
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy and paste a link'), findsOneWidget);
+    await tester.tap(find.text('Skip tutorial'));
+    await tester.pumpAndSettle();
+    expect(saved['tutorialSeen'], 'true');
+    expect(find.byKey(const Key('mediaLink')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await open(tester);
+    expect(find.text('Copy and paste a link'), findsNothing);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    final replay = find.text('Replay tutorial');
+    await tester.scrollUntilVisible(replay, 240);
+    await tester.tap(replay);
+    await tester.pumpAndSettle();
+    for (final title in [
+      'Share from another app',
+      'Check your download',
+      'Open and export saved media',
+      'Find and manage downloads',
+    ]) {
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      expect(find.text(title), findsOneWidget);
+    }
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings'), findsOneWidget);
   });
 
   testWidgets(
@@ -123,7 +175,7 @@ void main() {
     expect(find.byKey(const Key('platform:YouTube')), findsOneWidget);
   });
 
-  testWidgets('pasted TikTok short links immediately create a folder', (
+  testWidgets('pasting a TikTok short link after onboarding creates a folder', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
@@ -171,6 +223,8 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip tutorial'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const Key('mediaLink')),

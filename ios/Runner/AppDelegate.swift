@@ -24,7 +24,14 @@ import UniformTypeIdentifiers
       let defaults = UserDefaults.standard
       switch call.method {
       case "read":
-        result(defaults.dictionary(forKey: "clipshare_settings") ?? [:])
+        var values = defaults.dictionary(forKey: "clipshare_settings") ?? [:]
+        if defaults.bool(forKey: "clipshare_tutorial_seen") {
+          values["tutorialSeen"] = "true"
+        }
+        result(values)
+      case "markTutorialSeen":
+        defaults.set(true, forKey: "clipshare_tutorial_seen")
+        result(true)
       case "write":
         let allowed: [String: Set<String>] = [
           "theme": ["system", "light", "dark"],

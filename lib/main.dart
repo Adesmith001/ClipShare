@@ -10,6 +10,7 @@ import 'library.dart';
 import 'library_help.dart';
 import 'settings.dart';
 import 'brand.dart';
+import 'tutorial.dart';
 
 const plum = Color(0xFF302435);
 const apricot = Color(0xFFF5C5A5);
@@ -113,6 +114,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   Timer? _progressTimer;
   List<Map<Object?, Object?>> _sharedLinks = const [];
   bool _inboxUnavailable = false;
+  bool? _initialLibraryEmpty;
+  bool _tutorialOpen = false;
   bool _adding = false;
   bool _busy = false;
   bool _selecting = false;
@@ -177,9 +180,11 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           for (final group in grouped.values)
             ...(group..sort((a, b) => _position(a).compareTo(_position(b)))),
         ];
+        _initialLibraryEmpty ??= _sharedLinks.isEmpty;
         _inboxUnavailable = false;
         _selected.retainAll(_sharedLinks.map((entry) => entry['id'] as String));
       });
+      _maybeShowTutorial();
       if (_sharedLinks.any((entry) => entry['state'] == 'downloading') &&
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
         if (_progressTimer?.isActive != true) {
@@ -373,7 +378,42 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   }
 
   void _preferencesChanged() {
-    if (mounted) setState(() => _filter = null);
+    if (!mounted) return;
+    setState(() => _filter = null);
+    _maybeShowTutorial();
+  }
+
+  bool get _shouldShowTutorial =>
+      _initialLibraryEmpty == true &&
+      _sharedLinks.isEmpty &&
+      !_inboxUnavailable &&
+      !_tutorialOpen &&
+      _preferences.shouldOfferTutorial;
+
+  void _maybeShowTutorial() {
+    if (!_shouldShowTutorial) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          _shouldShowTutorial &&
+          ModalRoute.isCurrentOf(context) == true &&
+          !_searching &&
+          !_adding &&
+          _link.text.isEmpty) {
+        _showTutorial();
+      }
+    });
+  }
+
+  Future<void> _showTutorial() async {
+    if (_tutorialOpen) return;
+    _tutorialOpen = true;
+    FocusScope.of(context).unfocus();
+    await Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute(builder: (_) => const ClipShareTutorial()));
+    if (!mounted) return;
+    await _preferences.markTutorialSeen();
+    _tutorialOpen = false;
   }
 
   Future<void> _reload() => _refreshSharedLinks();
@@ -389,6 +429,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             ),
           ),
           onHelp: _showHelp,
+          onTutorial: _showTutorial,
         ),
       ),
     );
@@ -1261,7 +1302,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                                   onPressed: _inboxUnavailable
                                       ? _reload
                                       : _sharedLinks.isEmpty
-                                      ? _showHelp
+                                      ? _showTutorial
                                       : () => setState(() {
                                           _search.clear();
                                           _folder = null;

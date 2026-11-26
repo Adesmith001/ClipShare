@@ -35,8 +35,9 @@ class MainActivity : FlutterActivity() {
                 "sort" to setOf("newest", "oldest")
             )
             when (call.method) {
-                "read" -> result.success(allowed.keys.associateWith { prefs.getString(it, null) }
+                "read" -> result.success((allowed.keys + "tutorialSeen").associateWith { prefs.getString(it, null) }
                     .filterValues { it != null })
+                "markTutorialSeen" -> result.success(prefs.edit().putString("tutorialSeen", "true").commit())
                 "write" -> {
                     val values = call.arguments as? Map<*, *>
                     if (values == null || values.keys != allowed.keys ||

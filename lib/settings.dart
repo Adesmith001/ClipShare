@@ -8,6 +8,9 @@ class AppPreferences extends ChangeNotifier {
   String sort = 'newest';
   bool saving = false;
   bool _disposed = false;
+  bool? _tutorialSeen;
+
+  bool get shouldOfferTutorial => _tutorialSeen == false;
 
   ThemeMode get themeMode => switch (theme) {
     'light' => ThemeMode.light,
@@ -19,6 +22,7 @@ class AppPreferences extends ChangeNotifier {
     try {
       final values = await _channel.invokeMapMethod<String, String>('read');
       if (_disposed) return;
+      _tutorialSeen ??= values?['tutorialSeen'] == 'true';
       final t = values?['theme'];
       final f = values?['filter'];
       final s = values?['sort'];
@@ -30,6 +34,18 @@ class AppPreferences extends ChangeNotifier {
       // Desktop previews use the defaults; downloads are mobile only.
     } on PlatformException {
       // Keep usable defaults if preferences cannot be read.
+    }
+  }
+
+  Future<void> markTutorialSeen() async {
+    if (_tutorialSeen == true) return;
+    _tutorialSeen = true;
+    try {
+      await _channel.invokeMethod<bool>('markTutorialSeen');
+    } on PlatformException {
+      // Keep the dismissal for this session if storage is unavailable.
+    } on MissingPluginException {
+      // Desktop previews do not provide preference storage.
     }
   }
 
@@ -74,10 +90,12 @@ class SettingsScreen extends StatelessWidget {
     required this.preferences,
     required this.storage,
     required this.onHelp,
+    required this.onTutorial,
   });
   final AppPreferences preferences;
   final String storage;
   final VoidCallback onHelp;
+  final VoidCallback onTutorial;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -131,6 +149,13 @@ class SettingsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               const Divider(),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.school_outlined),
+                title: const Text('Replay tutorial'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: onTutorial,
+              ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.help_outline_rounded),
