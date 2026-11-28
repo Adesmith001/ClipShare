@@ -134,7 +134,7 @@ class LibraryHelp extends StatelessWidget {
           'Downloads are grouped automatically into Instagram, X, YouTube, TikTok, Pinterest, and Other folders. '
               'Tap a folder to open it, then use the back arrow to return to all downloads. '
               'Open search from the icon at the top right; it matches titles, sources, and link paths. '
-              'Use Select downloads for batch actions. Select all visible respects your search and filters. '
+              'Use Select downloads for batch actions. Select all and Deselect all apply to your current search and filters. '
               'Selected items remain selected when filters change; check the selected count before an action.',
         ),
         _section(

@@ -144,6 +144,25 @@ final class RunnerTests: XCTestCase {
     XCTAssertEqual(post.media.map(\.slot), [0, 1])
   }
 
+  func testReelMetadataMatchesTheRequestedReelAndRequiresAnApprovedMP4() throws {
+    let metadata = #"{"page":"https://www.instagram.com/reel/wanted/","videos":["https://evil.test/wrong.mp4","https://s.cdninstagram.com/poster.jpg","https://s.fbcdn.net/reel.mp4?token=signed"],"title":"Reel caption"}"#
+    let poster = #"{"code":"wanted","display_url":"https://s.cdninstagram.com/poster.jpg"}"#
+    let post = try XCTUnwrap(InstagramResolver.parse([poster], shortcode: "wanted", reelMetadata: metadata, isReel: true))
+    XCTAssertEqual(post.title, "Reel caption")
+    XCTAssertEqual(post.media.map { $0.url.lastPathComponent }, ["reel.mp4"])
+    XCTAssertEqual(InstagramResolver.reelPage(metadata)?.lastPathComponent, "wanted")
+    XCTAssertTrue(InstagramResolver.isReel(URL(string: "https://www.instagram.com/share/reel/alias/")!))
+    XCTAssertFalse(InstagramResolver.isReel(URL(string: "https://www.instagram.com/p/wanted/")!))
+    XCTAssertNil(InstagramResolver.reelPage(#"{"page":"https://www.instagram.com/share/reel/alias/","videos":[]}"#))
+    let structured = #"{"code":"wanted","carousel_media":[],"video_versions":[{"url":"https://s.fbcdn.net/structured.mp4"}]}"#
+    let preferred = InstagramResolver.parse([poster, structured], shortcode: "wanted", reelMetadata: metadata, isReel: true)
+    XCTAssertEqual(preferred?.media.map { $0.url.lastPathComponent }, ["structured.mp4"])
+    XCTAssertNil(InstagramResolver.parse([], shortcode: "other", reelMetadata: metadata, isReel: true))
+    XCTAssertNil(InstagramResolver.parse([poster], shortcode: "wanted", isReel: true))
+    let invalid = #"{"page":"https://www.instagram.com/reel/wanted/","videos":["https://evil.test/wrong.mp4","https://s.cdninstagram.com/poster.jpg"]}"#
+    XCTAssertNil(InstagramResolver.parse([], shortcode: "wanted", reelMetadata: invalid, isReel: true))
+  }
+
   func testSafeDownloadFailureCodes() {
     XCTAssertEqual(BackgroundDownloads.failureCode(URLError(.timedOut)), "timeout")
     XCTAssertEqual(BackgroundDownloads.failureCode(URLError(.notConnectedToInternet)), "network")

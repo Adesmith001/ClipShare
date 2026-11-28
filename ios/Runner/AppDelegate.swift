@@ -2,6 +2,7 @@ import AVKit
 import Flutter
 import ImageIO
 import Photos
+import StoreKit
 import UIKit
 import UniformTypeIdentifiers
 
@@ -28,9 +29,19 @@ import UniformTypeIdentifiers
         if defaults.bool(forKey: "clipshare_tutorial_seen") {
           values["tutorialSeen"] = "true"
         }
+        values["installedBuild"] = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        values["seenReleaseBuild"] = defaults.string(forKey: "clipshare_seen_release_build")
         result(values)
       case "markTutorialSeen":
         defaults.set(true, forKey: "clipshare_tutorial_seen")
+        result(true)
+      case "markReleaseSeen":
+        guard let build = call.arguments as? String,
+              build == Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String else {
+          result(false)
+          return
+        }
+        defaults.set(build, forKey: "clipshare_seen_release_build")
         result(true)
       case "write":
         let allowed: [String: Set<String>] = [
@@ -46,6 +57,48 @@ import UniformTypeIdentifiers
         }
         defaults.set(values, forKey: "clipshare_settings")
         result(true)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+    let updates = FlutterMethodChannel(
+      name: "clipshare/updates",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    updates.setMethodCallHandler { call, result in
+      switch call.method {
+      case "openStore":
+        guard let address = call.arguments as? String, let url = URL(string: address),
+              url.scheme == "https", ["apps.apple.com", "testflight.apple.com"].contains(url.host ?? "") else {
+          result(false)
+          return
+        }
+        UIApplication.shared.open(url, options: [:]) { opened in result(opened) }
+      case "iosInstall":
+        Task { @MainActor in
+          guard let bundleId = Bundle.main.bundleIdentifier,
+                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+                let build = Int(version) else {
+            result(nil)
+            return
+          }
+          let distribution: String
+          if #available(iOS 16.0, *),
+             let install = try? await AppTransaction.shared, case .verified(let transaction) = install {
+            if transaction.environment == .production {
+              distribution = "appStore"
+            } else if transaction.environment == .sandbox && bundleId == "com.adesmith001.clipshare.beta" {
+              distribution = "testflight"
+            } else {
+              result(nil)
+              return
+            }
+          } else {
+            result(nil)
+            return
+          }
+          result(["bundleId": bundleId, "distribution": distribution, "build": build,
+                  "osVersion": UIDevice.current.systemVersion])
+        }
       default: result(FlutterMethodNotImplemented)
       }
     }
@@ -106,6 +159,9 @@ import UniformTypeIdentifiers
           return
         }
         result(nil)
+      case "videoUri":
+        let file = (call.arguments as? String).flatMap { self?.savedFile($0) }
+        result(file?.pathExtension == "mp4" ? file?.absoluteString : nil)
       case "thumbnail", "preview":
         guard let id = call.arguments as? String,
               let file = self?.savedFile(id) else {

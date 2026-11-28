@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'release_notes.dart';
+
 class AppPreferences extends ChangeNotifier {
   static const _channel = MethodChannel('clipshare/preferences');
   String theme = 'system';
@@ -9,8 +11,15 @@ class AppPreferences extends ChangeNotifier {
   bool saving = false;
   bool _disposed = false;
   bool? _tutorialSeen;
+  String? installedBuild;
+  String? _seenReleaseBuild;
 
   bool get shouldOfferTutorial => _tutorialSeen == false;
+  ReleaseNotes? get releaseNotes => releases[installedBuild];
+  bool get hasUnseenRelease =>
+      releaseNotes != null &&
+      (int.tryParse(_seenReleaseBuild ?? '') ?? 0) <
+          (int.tryParse(installedBuild ?? '') ?? 0);
 
   ThemeMode get themeMode => switch (theme) {
     'light' => ThemeMode.light,
@@ -23,6 +32,8 @@ class AppPreferences extends ChangeNotifier {
       final values = await _channel.invokeMapMethod<String, String>('read');
       if (_disposed) return;
       _tutorialSeen ??= values?['tutorialSeen'] == 'true';
+      installedBuild = values?['installedBuild'];
+      _seenReleaseBuild ??= values?['seenReleaseBuild'];
       final t = values?['theme'];
       final f = values?['filter'];
       final s = values?['sort'];
@@ -42,6 +53,19 @@ class AppPreferences extends ChangeNotifier {
     _tutorialSeen = true;
     try {
       await _channel.invokeMethod<bool>('markTutorialSeen');
+    } on PlatformException {
+      // Keep the dismissal for this session if storage is unavailable.
+    } on MissingPluginException {
+      // Desktop previews do not provide preference storage.
+    }
+  }
+
+  Future<void> markReleaseSeen() async {
+    final build = installedBuild;
+    if (build == null || !hasUnseenRelease) return;
+    _seenReleaseBuild = build;
+    try {
+      await _channel.invokeMethod<bool>('markReleaseSeen', build);
     } on PlatformException {
       // Keep the dismissal for this session if storage is unavailable.
     } on MissingPluginException {
@@ -91,11 +115,15 @@ class SettingsScreen extends StatelessWidget {
     required this.storage,
     required this.onHelp,
     required this.onTutorial,
+    required this.onWhatsNew,
+    this.onTestFlight,
   });
   final AppPreferences preferences;
   final String storage;
   final VoidCallback onHelp;
   final VoidCallback onTutorial;
+  final VoidCallback onWhatsNew;
+  final VoidCallback? onTestFlight;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -149,6 +177,25 @@ class SettingsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               const Divider(),
+              if (preferences.releaseNotes != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.new_releases_outlined),
+                  title: const Text('What’s new'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: onWhatsNew,
+                ),
+              if (onTestFlight != null)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.system_update_outlined),
+                  title: const Text('TestFlight updates'),
+                  subtitle: const Text(
+                    'Check for updates or manage automatic updates',
+                  ),
+                  trailing: const Icon(Icons.open_in_new_rounded),
+                  onTap: onTestFlight,
+                ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.school_outlined),

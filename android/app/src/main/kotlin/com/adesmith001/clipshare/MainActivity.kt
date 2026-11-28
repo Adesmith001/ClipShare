@@ -1,12 +1,17 @@
 package com.adesmith001.clipshare
 
 import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import com.google.android.play.core.appupdate.AppUpdateOptions
+import com.google.android.play.core.install.model.AppUpdateType
+import com.google.android.play.core.install.model.UpdateAvailability
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -14,6 +19,8 @@ import io.flutter.plugin.common.StandardMethodCodec
 
 class MainActivity : FlutterActivity() {
     private val downloads by lazy { AndroidDownloads(applicationContext) }
+    private val appUpdates by lazy { AppUpdateManagerFactory.create(this) }
+    private var updateChannel: MethodChannel? = null
     private var channel: MethodChannel? = null
     private val completionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -35,9 +42,15 @@ class MainActivity : FlutterActivity() {
                 "sort" to setOf("newest", "oldest")
             )
             when (call.method) {
-                "read" -> result.success((allowed.keys + "tutorialSeen").associateWith { prefs.getString(it, null) }
-                    .filterValues { it != null })
+                "read" -> result.success((allowed.keys + setOf("tutorialSeen", "seenReleaseBuild"))
+                    .associateWith { prefs.getString(it, null) }.filterValues { it != null } +
+                    ("installedBuild" to BuildConfig.VERSION_CODE.toString()))
                 "markTutorialSeen" -> result.success(prefs.edit().putString("tutorialSeen", "true").commit())
+                "markReleaseSeen" -> {
+                    val build = call.arguments as? String
+                    result.success(build == BuildConfig.VERSION_CODE.toString() &&
+                        prefs.edit().putString("seenReleaseBuild", build).commit())
+                }
                 "write" -> {
                     val values = call.arguments as? Map<*, *>
                     if (values == null || values.keys != allowed.keys ||
@@ -50,6 +63,14 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 else -> result.notImplemented()
+            }
+        }
+        updateChannel = MethodChannel(messenger, "clipshare/updates").also { bridge ->
+            bridge.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "check", "start" -> handlePlayUpdate(call.method == "start", result)
+                    else -> result.notImplemented()
+                }
             }
         }
         channel = MethodChannel(
@@ -114,6 +135,10 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
+                    "videoUri" -> {
+                        val id = (call.arguments as? String)?.toLongOrNull()
+                        result.success(id?.let(downloads::videoUri)?.toString())
+                    }
                     "addResolved" -> {
                         val media = call.argument<String>("media")?.let(Uri::parse)
                         val source = call.argument<String>("source")?.let(Uri::parse)
@@ -170,9 +195,39 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        updateChannel?.setMethodCallHandler(null)
+        updateChannel = null
         channel?.setMethodCallHandler(null)
         channel = null
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    private fun handlePlayUpdate(start: Boolean, result: MethodChannel.Result) {
+        appUpdates.appUpdateInfo.addOnSuccessListener { info ->
+            val availability = info.updateAvailability()
+            val canUpdate = availability == UpdateAvailability.UPDATE_AVAILABLE ||
+                availability == UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS
+            if (!start) {
+                result.success(if (canUpdate) "Google Play" else null)
+            } else if (!canUpdate || isFinishing || isDestroyed) {
+                result.success(false)
+            } else if (!info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)) {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName")))
+                    result.success(true)
+                } catch (_: ActivityNotFoundException) {
+                    result.success(false)
+                }
+            } else {
+                appUpdates.startUpdateFlow(
+                    info, this, AppUpdateOptions.defaultOptions(AppUpdateType.IMMEDIATE)
+                ).addOnCompleteListener { update ->
+                    result.success(update.isSuccessful && update.result == RESULT_OK)
+                }
+            }
+        }.addOnFailureListener {
+            result.error("play_update_check_failed", null, null)
+        }
     }
 
     override fun onStart() {

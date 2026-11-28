@@ -28,6 +28,7 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
   private var resolutionAttempt = 0
   private var navigationGeneration = 0
   private var responseStatus = 200
+  private var desktopReelCode: String?
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -97,7 +98,12 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
         }
         if let url {
           guard let normalizedURL = SharedLinks.canonicalSource(url) else { continue }
-          sharedURL = normalizedURL
+          if InstagramResolver.isReel(url), !normalizedURL.path.hasPrefix("/share/"),
+             let code = InstagramResolver.shortcode(url) {
+            sharedURL = URL(string: "https://www.instagram.com/reel/\(code)/")
+          } else {
+            sharedURL = normalizedURL
+          }
           message.text = normalizedURL.host.map { "Ready to add media from \($0)." }
           message.lineBreakMode = .byTruncatingMiddle
           message.numberOfLines = 3
@@ -162,10 +168,11 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
     }
   }
 
-  private func showInstagramPage(_ url: URL) {
+  private func showInstagramPage(_ url: URL, desktopReel: Bool = false) {
     navigationGeneration += 1
     resolutionAttempt = 0
     responseStatus = 200
+    desktopReelCode = desktopReel ? InstagramResolver.shortcode(url) : nil
     instagramState = .checking
     webLoadTimeout?.cancel()
     saveButton.isEnabled = false
@@ -236,19 +243,20 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
   func webView(
     _ webView: WKWebView,
     decidePolicyFor navigationAction: WKNavigationAction,
-    decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    preferences: WKWebpagePreferences,
+    decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
   ) {
     guard let url = navigationAction.request.url,
           let host = url.host?.lowercased()
     else {
-      decisionHandler(.cancel)
+      decisionHandler(.cancel, preferences)
       return
     }
     let instagramHost = host == "instagram.com" || host.hasSuffix(".instagram.com")
     let facebookHost = host == "facebook.com" || host.hasSuffix(".facebook.com")
     guard url.scheme?.lowercased() == "https", instagramHost || facebookHost else {
       NSLog("ClipShare InstagramShare blocked navigation scheme=%@ host=%@", url.scheme ?? "unknown", host)
-      decisionHandler(.cancel)
+      decisionHandler(.cancel, preferences)
       return
     }
     NSLog("ClipShare InstagramShare allowed navigation scheme=%@ host=%@", url.scheme ?? "unknown", host)
@@ -258,7 +266,11 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
       saveButton.setTitle("Continue to shared post after sign-in", for: .normal)
       saveButton.isEnabled = true
     }
-    decisionHandler(.allow)
+    if let desktopReelCode, navigationAction.targetFrame?.isMainFrame != false,
+       InstagramResolver.shortcode(url) == desktopReelCode {
+      preferences.preferredContentMode = .desktop
+    }
+    decisionHandler(.allow, preferences)
   }
 
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -353,27 +365,37 @@ final class ShareViewController: UIViewController, WKNavigationDelegate {
   private func resolveInstagram(generation: Int) {
     guard instagramState == .resolving, generation == navigationGeneration else { return }
     guard let sharedURL, let requestedCode = InstagramResolver.shortcode(sharedURL),
-          let finalURL = webView.url, let finalCode = InstagramResolver.shortcode(finalURL),
-          let source = SharedLinks.canonicalSource(finalURL) else {
+          let finalURL = webView.url, let finalCode = InstagramResolver.shortcode(finalURL) else {
       failInstagram("Open the shared post in Instagram, then retry.")
       return
     }
     let sharedAlias = sharedURL.path.hasPrefix("/share/")
-    guard sharedAlias || requestedCode == finalCode else {
+    guard desktopReelCode.map({ $0 == finalCode }) ?? (sharedAlias || requestedCode == finalCode) else {
       failInstagram("Instagram opened a different post. Retry the original shared link.")
       return
     }
-    let code = sharedAlias ? finalCode : requestedCode
+    let isReel = InstagramResolver.isReel(sharedURL) || InstagramResolver.isReel(finalURL)
+    let needsReelPage = isReel && sharedAlias && finalURL.path.hasPrefix("/share/")
     webView.evaluateJavaScript(InstagramResolver.pageJSONScript) { [weak self] result, error in
       guard let self, generation == self.navigationGeneration, self.instagramState == .resolving else { return }
       if error != nil {
         self.failInstagram("Could not read the shared post. Check your connection and retry.")
         return
       }
-      guard let post = InstagramResolver.parse(result as? [String] ?? [], shortcode: code) else {
+      let pageData = result as? [String] ?? []
+      // Some share aliases provide the real Reel URL in metadata without redirecting.
+      let postURL = needsReelPage ? InstagramResolver.reelPage(pageData.first) : finalURL
+      let postCode = postURL.flatMap(InstagramResolver.shortcode)
+      guard let postURL, let code = postCode, let source = SharedLinks.canonicalSource(postURL),
+            let post = InstagramResolver.parse(
+              Array(pageData.dropFirst()), shortcode: code, reelMetadata: pageData.first, isReel: isReel
+            ) else {
         self.resolutionAttempt += 1
         if self.resolutionAttempt < 5 {
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.resolveInstagram(generation: generation) }
+        } else if isReel, self.desktopReelCode == nil, let postCode,
+                  let reelURL = URL(string: "https://www.instagram.com/reel/\(postCode)/") {
+          self.showInstagramPage(reelURL, desktopReel: true)
         } else {
           self.failInstagram("This post could not be read. It may be unavailable, require sign-in, or use an unsupported Instagram format.")
         }

@@ -4,12 +4,18 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:video_player/video_player.dart';
 
 import 'social_video.dart';
 import 'library.dart';
 import 'library_help.dart';
+import 'release_notes.dart';
 import 'settings.dart';
 import 'brand.dart';
+import 'app_updates.dart';
+import 'build_mode.dart';
+
+part 'carousel_viewer.dart';
 
 const plum = Color(0xFF302435);
 const apricot = Color(0xFFF5C5A5);
@@ -25,14 +31,20 @@ class ClipShareApp extends StatefulWidget {
 
 class _ClipShareAppState extends State<ClipShareApp> {
   final _preferences = AppPreferences();
+  final _updates = AppUpdates();
+  late final AppLifecycleListener _updateLifecycle;
   @override
   void initState() {
     super.initState();
     _preferences.load();
+    _updateLifecycle = AppLifecycleListener(onResume: _updates.check);
+    unawaited(_updates.check());
   }
 
   @override
   void dispose() {
+    _updateLifecycle.dispose();
+    _updates.dispose();
     _preferences.dispose();
     super.dispose();
   }
@@ -88,6 +100,7 @@ class _ClipShareAppState extends State<ClipShareApp> {
       darkTheme: _theme(Brightness.dark),
       themeMode: _preferences.themeMode,
       home: DownloadsScreen(preferences: _preferences),
+      builder: (context, child) => UpdateGate(updates: _updates, child: child!),
     ),
   );
 }
@@ -115,6 +128,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   bool _inboxUnavailable = false;
   bool? _initialLibraryEmpty;
   bool _tutorialOpen = false;
+  bool _releaseNotesOpen = false;
   int _tutorialStep = 0;
   String? _tutorialSource;
   final _tutorialKnownIds = <Object?>{};
@@ -143,7 +157,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
   void _endTutorial() {
     setState(() => _tutorialOpen = false);
-    _preferences.markTutorialSeen();
+    unawaited(_preferences.markTutorialSeen());
+    _maybeShowWhatsNew();
   }
 
   Widget _tutorialHint(String title, String text, {VoidCallback? next}) =>
@@ -265,6 +280,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         _selected.retainAll(_sharedLinks.map((entry) => entry['id'] as String));
       });
       _maybeShowTutorial();
+      _maybeShowWhatsNew();
       if (_sharedLinks.any((entry) => entry['state'] == 'downloading') &&
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
         if (_progressTimer?.isActive != true) {
@@ -479,6 +495,33 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     if (!mounted) return;
     setState(() => _filter = null);
     _maybeShowTutorial();
+    _maybeShowWhatsNew();
+  }
+
+  void _maybeShowWhatsNew() {
+    if (!_preferences.hasUnseenRelease || _initialLibraryEmpty == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          !_tutorialOpen &&
+          !_shouldShowTutorial &&
+          !_searching &&
+          !_adding &&
+          _link.text.isEmpty &&
+          ModalRoute.isCurrentOf(context) == true) {
+        unawaited(_showWhatsNew());
+      }
+    });
+  }
+
+  Future<void> _showWhatsNew() async {
+    final notes = _preferences.releaseNotes;
+    if (notes == null || _releaseNotesOpen) return;
+    _releaseNotesOpen = true;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => ReleaseNotesScreen(notes: notes)),
+    );
+    _releaseNotesOpen = false;
+    if (mounted) await _preferences.markReleaseSeen();
   }
 
   bool get _shouldShowTutorial =>
@@ -533,6 +576,17 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             ),
           ),
           onHelp: _showHelp,
+          onWhatsNew: _showWhatsNew,
+          onTestFlight:
+              storeBeta &&
+                  _hasNativeDownloads &&
+                  defaultTargetPlatform == TargetPlatform.iOS
+              ? () async {
+                  if (!await AppUpdates.openTestFlight() && mounted) {
+                    _showMessage('Open TestFlight to check for updates.');
+                  }
+                }
+              : null,
           onTutorial: () {
             Navigator.of(context).pop();
             _showTutorial();
@@ -729,6 +783,34 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     );
   }
 
+  Future<void> _openMedia(DownloadEntry entry) async {
+    final id = entry['id'] as String;
+    final title = mediaTitle(entry);
+    if (_position(entry) > 0) {
+      final slides =
+          _sharedLinks
+              .where(
+                (slide) => slide['url'] == entry['url'] && _position(slide) > 0,
+              )
+              .toList()
+            ..sort((a, b) => _position(a).compareTo(_position(b)));
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => _CarouselViewer(
+            slides: slides,
+            initialPage: slides.indexOf(entry),
+            preview: (id) => _mediaPreview('preview', id),
+            videoUri: (id) => _channel.invokeMethod<String>('videoUri', id),
+          ),
+        ),
+      );
+    } else if (mediaIsImage(entry)) {
+      await _openImage(id, title);
+    } else {
+      await _playVideo(id);
+    }
+  }
+
   Widget _downloadRow(Map<Object?, Object?> entry) {
     final theme = Theme.of(context);
     final id = entry['id'] as String;
@@ -749,7 +831,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       _ => 'Pending download',
     };
     final open = saved && !_selecting && !_busy
-        ? () => isImage ? _openImage(id, title) : _playVideo(id)
+        ? () => _openMedia(entry)
         : null;
     final placeholder = ColoredBox(
       color: theme.colorScheme.secondary.withValues(alpha: 0.45),
@@ -824,6 +906,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       ),
     );
     final row = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _selecting && !_busy && !_adding
+          ? () => _toggleSelection(id)
+          : null,
       onLongPress: _busy || _adding
           ? null
           : () => setState(() {
@@ -845,6 +931,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           else
             Tooltip(
               message: isImage ? 'View image' : 'Play video',
+              triggerMode: TooltipTriggerMode.manual,
               child: InkWell(
                 onTap: open,
                 borderRadius: BorderRadius.circular(10),
@@ -1127,6 +1214,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final entries = _sharedLinks
         .where((entry) => _selected.contains(entry['id']))
         .toList();
+    final visibleIds = visible.map((entry) => entry['id'] as String).toSet();
+    final allVisibleSelected =
+        visibleIds.isNotEmpty && visibleIds.every(_selected.contains);
     return Wrap(
       crossAxisAlignment: WrapCrossAlignment.center,
       spacing: 8,
@@ -1135,21 +1225,17 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           '${_selected.length} selected',
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
-        IconButton(
-          tooltip: 'Select all visible',
-          onPressed: _busy || _adding
+        OutlinedButton(
+          onPressed: _busy || _adding || visibleIds.isEmpty
               ? null
               : () => setState(() {
-                  final ids = visible
-                      .map((entry) => entry['id'] as String)
-                      .toSet();
-                  if (ids.every(_selected.contains)) {
-                    _selected.removeAll(ids);
+                  if (allVisibleSelected) {
+                    _selected.removeAll(visibleIds);
                   } else {
-                    _selected.addAll(ids);
+                    _selected.addAll(visibleIds);
                   }
                 }),
-          icon: const Icon(Icons.select_all_rounded),
+          child: Text(allVisibleSelected ? 'Deselect all' : 'Select all'),
         ),
         PopupMenuButton<String>(
           key: const Key('batchActions'),

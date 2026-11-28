@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 void main() {
   const downloads = MethodChannel('clipshare/shared_links');
   const preferences = MethodChannel('clipshare/preferences');
+  const updates = MethodChannel('clipshare/updates');
   late Map<String, String> saved;
   setUp(() {
     saved = {};
@@ -20,6 +21,10 @@ void main() {
       }
       if (call.method == 'markTutorialSeen') {
         saved['tutorialSeen'] = 'true';
+        return true;
+      }
+      if (call.method == 'markReleaseSeen') {
+        saved['seenReleaseBuild'] = call.arguments as String;
         return true;
       }
       return null;
@@ -58,7 +63,73 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(downloads, null);
     messenger.setMockMethodCallHandler(preferences, null);
+    messenger.setMockMethodCallHandler(updates, null);
     debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('shows release notes once and lets users reopen them', (
+    tester,
+  ) async {
+    saved.addAll({'installedBuild': '14', 'tutorialSeen': 'true'});
+    await open(tester);
+    expect(find.text('What’s new'), findsOneWidget);
+    expect(find.text('Select downloads faster'), findsOneWidget);
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(saved['seenReleaseBuild'], '14');
+    await tester.pumpWidget(const SizedBox());
+    await open(tester);
+    expect(find.text('What’s new'), findsNothing);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('What’s new'), 240);
+    await tester.tap(find.text('What’s new'));
+    await tester.pumpAndSettle();
+    expect(find.text('Select downloads faster'), findsOneWidget);
+  });
+
+  testWidgets(
+    'requires a confirmed store update and retries after cancellation',
+    (tester) async {
+      final messenger = tester.binding.defaultBinaryMessenger;
+      var starts = 0;
+      messenger.setMockMethodCallHandler(updates, (call) async {
+        if (call.method == 'check') return 'Google Play';
+        if (call.method == 'start') starts++;
+        return false;
+      });
+      await open(tester);
+      expect(find.text('Update required'), findsOneWidget);
+      expect(find.byTooltip('Settings'), findsNothing);
+      await tester.tap(find.text('Update now'));
+      await tester.pumpAndSettle();
+      expect(starts, 1);
+      expect(find.text('Update required'), findsOneWidget);
+      await tester.tap(find.text('Update now'));
+      await tester.pumpAndSettle();
+      expect(starts, 2);
+    },
+  );
+
+  testWidgets('checks for updates again when the app returns', (tester) async {
+    var available = false;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      updates,
+      (_) async => available ? 'Google Play' : null,
+    );
+    final binding = tester.binding;
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await open(tester);
+    expect(find.byTooltip('Settings'), findsOneWidget);
+    available = true;
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(find.text('Update required'), findsOneWidget);
   });
 
   testWidgets('first launch offers the tutorial once and Settings replays it', (

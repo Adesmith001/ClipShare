@@ -93,5 +93,6 @@ flutter {
 // The platform test runner lives in an optional SDK library on current Android.
 // Compile-only keeps these platform classes out of both APKs.
 dependencies {
+    implementation("com.google.android.play:app-update:2.1.0")
     androidTestCompileOnly(files("${android.sdkDirectory}/platforms/android-${android.compileSdk}/optional/android.test.base.jar"))
 }

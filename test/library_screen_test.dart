@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:clipshare/main.dart';
 import 'package:clipshare/social_video.dart';
@@ -121,8 +122,9 @@ void main() {
     await open(tester);
     await tester.tap(find.byTooltip('Select downloads'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Select all visible'));
+    await tester.tap(find.text('Select all'));
     await tester.pumpAndSettle();
+    expect(find.text('Deselect all'), findsOneWidget);
     await tester.tap(find.byKey(const Key('batchActions')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Retry / download'));
@@ -131,6 +133,90 @@ void main() {
       '2',
     ]);
     expect(find.textContaining('1 completed'), findsOneWidget);
+  });
+
+  testWidgets('tapping media toggles bulk selection', (tester) async {
+    entries[1]['state'] = 'saved';
+    await open(tester);
+    final video = tester.getCenter(find.byTooltip('Play video'));
+    await tester.longPressAt(video);
+    await tester.pumpAndSettle();
+    expect(find.text('1 selected'), findsOneWidget);
+
+    final image = find.byIcon(Icons.image_outlined);
+    await tester.tap(image);
+    await tester.pumpAndSettle();
+    expect(find.text('2 selected'), findsOneWidget);
+    await tester.tap(image);
+    await tester.pumpAndSettle();
+    expect(find.text('1 selected'), findsOneWidget);
+    expect(
+      actions.where(
+        (call) => call.method == 'play' || call.method == 'preview',
+      ),
+      isEmpty,
+    );
+  });
+
+  testWidgets('carousel opens the tapped slide and swipes in post order', (
+    tester,
+  ) async {
+    const source = 'https://www.instagram.com/p/example/';
+    final preview = File('assets/clipshare-icon.png').readAsBytesSync();
+    entries = [
+      for (final position in [4, 2, 1, 3])
+        {
+          'id': 'slide$position',
+          'url': source,
+          'state': 'saved',
+          'isImage': position != 3,
+          'position': '$position/4',
+        },
+    ];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      if (call.method == 'list') return entries;
+      actions.add(call);
+      if (call.method == 'preview') return preview;
+      return null;
+    });
+    await open(tester);
+    await tester.tap(find.text('2/4'));
+    await tester.pumpAndSettle();
+    final pager = find.byType(PageView);
+    expect(pager, findsOneWidget);
+    expect(find.text('2/4'), findsOneWidget);
+    expect(
+      actions.any(
+        (call) => call.method == 'preview' && call.arguments == 'slide2',
+      ),
+      isTrue,
+    );
+
+    await tester.fling(pager, const Offset(400, 0), 700);
+    await tester.pumpAndSettle();
+    expect(find.text('1/4'), findsOneWidget);
+    await tester.fling(pager, const Offset(-400, 0), 700);
+    await tester.pumpAndSettle();
+    expect(find.text('2/4'), findsOneWidget);
+    await tester.fling(pager, const Offset(-400, 0), 700);
+    await tester.pumpAndSettle();
+    expect(find.text('3/4'), findsOneWidget);
+    expect(find.byTooltip('Play video'), findsOneWidget);
+    await tester.tap(find.byTooltip('Play video'));
+    await tester.pumpAndSettle();
+    expect(find.text('This video is unavailable.'), findsOneWidget);
+    expect(
+      actions.where((call) => call.method == 'videoUri').single.arguments,
+      'slide3',
+    );
+    await tester.fling(pager, const Offset(-400, 0), 700);
+    await tester.pumpAndSettle();
+    expect(find.text('4/4'), findsOneWidget);
+    await tester.fling(pager, const Offset(400, 0), 700);
+    await tester.pumpAndSettle();
+    expect(find.text('3/4'), findsOneWidget);
   });
 
   testWidgets(
@@ -262,7 +348,7 @@ void main() {
       await open(tester);
       await tester.tap(find.byTooltip('Select downloads'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Select all visible'));
+      await tester.tap(find.text('Select all'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('batchActions')));
       await tester.pumpAndSettle();

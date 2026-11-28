@@ -29,7 +29,7 @@ Use **Save to Gallery** on Android 10 or later. On iOS, open the item's export m
 
 Downloads are grouped into **Instagram**, **X**, **YouTube**, **TikTok**, **Pinterest**, and **Other** folders automatically, using the original post link. Folders appear as soon as a source has an entry, show saved/total counts, and include existing downloads. Tap a folder to open its media; use the back arrow to return to all downloads. The home screen shows only platform folders; media lists and selection controls appear when you open a folder or search. Manual folder creation and moving are no longer needed. Older folder metadata and local files are preserved for compatibility.
 
-Tap the **search icon at the top right** to open search. Search matches titles, sources, and URL paths; URL tokens are excluded. Search combines with the current platform and Photos/Videos filter. Close search to clear its query. Tap **Select downloads**, or long-press an item, to select entries. **Select all visible** respects the current filters. Selected entries remain selected when filters change; check the selected count. Batch actions can delete, retry/download, cancel, or export eligible media. Deletion requires confirmation and keeps exported copies.
+Tap the **search icon at the top right** to open search. Search matches titles, sources, and URL paths; URL tokens are excluded. Search combines with the current platform and Photos/Videos filter. Close search to clear its query. Tap **Select downloads**, or long-press an item, to select entries. **Select all** and **Deselect all** apply to the current view. Selected entries remain selected when filters change; check the selected count. Batch actions can delete, retry/download, cancel, or export eligible media. Deletion requires confirmation and keeps exported copies.
 
 Open **Settings** from the top bar to choose **System**, **Light**, or **Dark** appearance, the default **All/Photos/Videos** filter, and **Newest first/Oldest first** ordering. Preferences are saved on the device and restored after relaunch. Settings also shows local media storage and links to help and diagnostics.
 
@@ -38,6 +38,24 @@ Open **Settings** from the top bar to choose **System**, **Light**, or **Dark** 
 ## TikTok resolver
 
 TikTok video downloads use [TikWM](https://www.tikwm.com/), a public third-party resolver. Only the public video link is sent, with tracking parameters removed; passwords, accounts, and website sessions are not sent. Long video URLs, `vm.tiktok.com`, `vt.tiktok.com`, and `/t/` shares are accepted. Signed MP4 URLs are checked against the TikTok/TikWM media hosts before queuing, and the native queues still validate downloaded files. TikTok photo slideshows, private/restricted/deleted posts and live streams are not supported. Service limits or provider changes can make a link temporarily unavailable; wait briefly and retry with a fresh link.
+
+## Release notes and required updates
+
+For each release, bump the version and build in `pubspec.yaml` and add the matching build to [the release notes catalog](lib/release_notes.dart). Describe each feature and how to use it. ClipShare opens **What’s new** once for the installed build and keeps the page in Settings.
+
+Android checks Google Play on launch and when ClipShare returns to the foreground. If Play offers a newer build for that installation, ClipShare shows **Update required** and offers Play’s immediate update flow or its store listing. To test the flow, install the earlier build through a Play testing track, then make the newer build available to the same account.
+
+On iPhone, TestFlight and the App Store manage automatic downloads. To enable the in-app required-update screen on iOS 16 and later, deploy the ClipShare website with [updates.json](privacy-site/updates.json) and set `IOS_UPDATE_FEED` to the HTTPS URL of that file in the private store-beta GitHub repository’s Actions variables. For a manual iOS build, pass `--dart-define=IOS_UPDATE_FEED=https://your-domain.example/updates.json`. Use the installed bundle ID and distribution as keys. Build 14 introduces the update check. The example below makes build 15 required once it is available to its testers.
+
+```json
+{
+  "com.adesmith001.clipshare.beta": {
+    "testflight": { "minimumBuild": 15, "minimumOS": "16.0" }
+  }
+}
+```
+
+For an App Store release, use `appStore` under its bundle ID and add the release’s numeric `appStoreId` as a JSON string. Publish a new minimum only after the corresponding update is available to everyone in that distribution and keep the minimum OS accurate. An empty object leaves the iOS requirement disabled. TestFlight users can open TestFlight from Settings to check for builds and manage automatic updates.
 
 ## Android release signing
 

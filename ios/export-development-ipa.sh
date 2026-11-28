@@ -20,6 +20,9 @@ if [[ "$mode" == store-beta ]]; then
   signing_identity='Apple Distribution'
   export_method=app-store-connect
   flutter_options=(--dart-define=STORE_BETA=true)
+  if [[ -n "${IOS_UPDATE_FEED:-}" ]]; then
+    flutter_options+=("--dart-define=IOS_UPDATE_FEED=$IOS_UPDATE_FEED")
+  fi
   build_settings=("CLIPSHARE_BUNDLE_ID=$runner_bundle" "CLIPSHARE_APP_GROUP=$expected_group" 'CLIPSHARE_DISPLAY_NAME=ClipShare Beta' 'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) STORE_BETA')
 elif [[ "$mode" != development ]]; then
   echo 'Unsupported distribution mode.' >&2

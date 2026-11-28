@@ -1,6 +1,6 @@
 import Foundation
 
-// Reads only page-provided JSON. Authentication stays entirely in WKWebView.
+// Reads page-provided data. Authentication stays entirely in WKWebView.
 enum InstagramResolver {
   static let pageJSONScript = """
     (() => {
@@ -11,6 +11,15 @@ enum InstagramResolver {
         if (total + text.length > 8000000 || result.length >= 12) break;
         result.push(text); total += text.length;
       }
+      const meta = property => document.querySelector('meta[property="' + property + '"]')?.content;
+      const videos = ['og:video:secure_url', 'og:video:url', 'og:video'].map(meta).filter(Boolean);
+      // Keep page metadata separate from Instagram's post JSON.
+      const metadata = JSON.stringify({
+        page: document.querySelector('link[rel="canonical"]')?.href || meta('og:url'),
+        title: meta('og:description'),
+        videos
+      });
+      result.unshift(metadata.length <= 16000 ? metadata : '');
       return result;
     })()
     """
@@ -37,43 +46,81 @@ enum InstagramResolver {
     return path[index].range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil ? path[index] : nil
   }
 
-  static func parse(_ scripts: [String], shortcode: String) -> Post? {
+  static func isReel(_ url: URL) -> Bool {
+    guard shortcode(url) != nil else { return false }
+    let path = url.pathComponents.filter { $0 != "/" }
+    return ["reel", "reels", "tv"].contains(path[path[0] == "share" ? 1 : 0])
+  }
+
+  static func parse(
+    _ scripts: [String], shortcode: String, reelMetadata: String? = nil, isReel: Bool = false
+  ) -> Post? {
     for script in scripts {
       guard script.utf8.count < 8_000_000, let data = script.data(using: .utf8),
             let root = try? JSONSerialization.jsonObject(with: data) else { continue }
       var remaining = 100_000
-      if let media = find(root, shortcode: shortcode, depth: 0, remaining: &remaining) {
-        return post(media)
+      if let media = find(root, shortcode: shortcode, isReel: isReel, depth: 0, remaining: &remaining) {
+        return post(media, isReel: isReel)
       }
     }
-    return nil
+    guard isReel, let data = decodeMetadata(reelMetadata),
+          let page = data.postPage, Self.shortcode(page) == shortcode,
+          let video = data.videos.lazy.compactMap({ allowedURL($0, video: true) }).first
+    else { return nil }
+    return Post(title: data.title.map { String($0.prefix(500)) },
+                media: [Media(url: video, slot: 0, position: nil)], total: 1)
   }
 
-  private static func find(_ value: Any, shortcode: String, depth: Int, remaining: inout Int) -> [String: Any]? {
+  private struct ReelMetadata: Decodable {
+    let page: String
+    let videos: [String]
+    let title: String?
+
+    var postPage: URL? {
+      guard let url = URL(string: page), url.scheme == "https", url.user == nil,
+            url.password == nil, InstagramResolver.shortcode(url) != nil,
+            !url.path.hasPrefix("/share/") else { return nil }
+      return url
+    }
+  }
+
+  static func reelPage(_ metadata: String?) -> URL? {
+    decodeMetadata(metadata)?.postPage
+  }
+
+  private static func decodeMetadata(_ metadata: String?) -> ReelMetadata? {
+    guard let metadata, metadata.utf8.count <= 16_000 else { return nil }
+    return try? JSONDecoder().decode(ReelMetadata.self, from: Data(metadata.utf8))
+  }
+
+  private static func find(
+    _ value: Any, shortcode: String, isReel: Bool, depth: Int, remaining: inout Int
+  ) -> [String: Any]? {
     guard depth < 80, remaining > 0 else { return nil }
     remaining -= 1
     if let object = value as? [String: Any] {
       if (object["shortcode"] as? String ?? object["code"] as? String) == shortcode,
          object["video_url"] != nil || object["display_url"] != nil || object["image_versions2"] != nil ||
-          object["video_versions"] != nil || object["edge_sidecar_to_children"] != nil || object["carousel_media"] != nil {
+          object["video_versions"] != nil || object["edge_sidecar_to_children"] != nil || object["carousel_media"] != nil,
+         !isReel || mediaURL(object)?.pathExtension.lowercased() == "mp4" {
         return object
       }
       // Prefer the requested post shape over recommendation / related-media trees.
       for key in ["xig_polaris_shortcode_web_info", "xig_polaris_media", "shortcode_media", "items"] {
-        if let child = object[key], let match = find(child, shortcode: shortcode, depth: depth + 1, remaining: &remaining) { return match }
+        if let child = object[key], let match = find(child, shortcode: shortcode, isReel: isReel, depth: depth + 1, remaining: &remaining) { return match }
       }
       for child in object.values {
-        if let match = find(child, shortcode: shortcode, depth: depth + 1, remaining: &remaining) { return match }
+        if let match = find(child, shortcode: shortcode, isReel: isReel, depth: depth + 1, remaining: &remaining) { return match }
       }
     } else if let array = value as? [Any] {
       for child in array {
-        if let match = find(child, shortcode: shortcode, depth: depth + 1, remaining: &remaining) { return match }
+        if let match = find(child, shortcode: shortcode, isReel: isReel, depth: depth + 1, remaining: &remaining) { return match }
       }
     }
     return nil
   }
 
-  private static func post(_ object: [String: Any]) -> Post {
+  private static func post(_ object: [String: Any], isReel: Bool) -> Post {
     let edgeCaption = ((object["edge_media_to_caption"] as? [String: Any])?["edges"] as? [[String: Any]])?.first?["node"] as? [String: Any]
     let title = (object["caption"] as? [String: Any])?["text"] as? String ??
       edgeCaption?["text"] as? String ?? object["title"] as? String
@@ -81,7 +128,7 @@ enum InstagramResolver {
       .map { ($0 as? [String: Any])?["node"] as? [String: Any] ?? [:] }
     let carousel = (object["carousel_media"] as? [Any])?.map { $0 as? [String: Any] ?? [:] }
     let missingCarousel = object["media_type"] as? Int == 8 || object["__typename"] as? String == "GraphSidecar"
-    let slides = carousel ?? sidecar ?? (missingCarousel ? [] : [object])
+    let slides = isReel ? [object] : carousel ?? sidecar ?? (missingCarousel ? [] : [object])
     let media = slides.enumerated().compactMap { index, slide -> Media? in
       guard let url = mediaURL(slide) else { return nil }
       return Media(url: url, slot: index, position: slides.count > 1 ? "\(index + 1)/\(slides.count)" : nil)

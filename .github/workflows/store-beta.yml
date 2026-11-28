@@ -40,6 +40,7 @@ jobs:
           IOS_RUNNER_PROFILE: ${{ secrets.STORE_BETA_RUNNER_PROFILE_BASE64 }}
           IOS_EXTENSION_PROFILE: ${{ secrets.STORE_BETA_EXTENSION_PROFILE_BASE64 }}
           CLIPSHARE_DISTRIBUTION_MODE: store-beta
+          IOS_UPDATE_FEED: ${{ vars.IOS_UPDATE_FEED }}
         run: bash ios/export-development-ipa.sh
       - uses: actions/upload-artifact@v7
         with:
